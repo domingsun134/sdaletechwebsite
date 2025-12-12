@@ -56,10 +56,17 @@ const OffboardingManager = () => {
 
     useEffect(() => {
         fetchRequests();
+
+        // Auto-refresh every 10 seconds to catch Power Automate updates
+        const interval = setInterval(() => {
+            fetchRequests(true); // Silent refresh
+        }, 10000);
+
+        return () => clearInterval(interval);
     }, []);
 
-    const fetchRequests = async () => {
-        setIsLoadingRequests(true);
+    const fetchRequests = async (isBackground = false) => {
+        if (!isBackground) setIsLoadingRequests(true);
         try {
             const { data, error } = await supabase
                 .from('offboarding_requests')
@@ -71,7 +78,7 @@ const OffboardingManager = () => {
         } catch (err) {
             console.error('Error fetching offboarding requests:', err);
         } finally {
-            setIsLoadingRequests(false);
+            if (!isBackground) setIsLoadingRequests(false);
         }
     };
 

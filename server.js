@@ -15,8 +15,7 @@ const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
-// Bypass SSL verification for development (fixes SELF_SIGNED_CERT_IN_CHAIN error)
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 
 // Simple file logger
 function logToFile(message) {
@@ -64,6 +63,44 @@ const s3Client = new S3Client({
 // Supabase Configuration
 import { createClient } from '@supabase/supabase-js';
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY);
+
+// Audit Logging Helper
+async function logAuditAction(category, action, details, performedBy = 'SYSTEM', targetUser = 'N/A') {
+    try {
+        const { error } = await supabase
+            .from('audit_logs')
+            .insert({
+                category,
+                action,
+                details,
+                performed_by: performedBy,
+                target_user: targetUser
+            });
+
+        if (error) console.error('Failed to write audit log:', error);
+    } catch (err) {
+        console.error('Audit log exception:', err);
+    }
+}
+
+// ... existing code ...
+
+// API to fetch audit logs
+app.get('/api/audit-logs', async (req, res) => {
+    try {
+        const { data, error } = await supabase
+            .from('audit_logs')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(100);
+
+        if (error) throw error;
+        res.json(data);
+    } catch (error) {
+        console.error('Error fetching audit logs:', error);
+        res.status(500).json({ error: 'Failed to fetch logs' });
+    }
+});
 
 // Email Configuration
 const transporter = nodemailer.createTransport({
@@ -726,6 +763,15 @@ app.post('/api/trigger-offboarding-workflow', async (req, res) => {
         }
 
         console.log('Power Automate workflow triggered successfully');
+
+        await logAuditAction(
+            'OFFBOARDING',
+            'TRIGGER_WORKFLOW',
+            { employeeId: req.body.employee_id, ...req.body },
+            'ADMIN', // Assuming admin triggers this manually
+            req.body.employee_name || 'Unknown'
+        );
+
         res.json({ message: 'Workflow triggered' });
     } catch (error) {
         console.error('Error triggering workflow:', error);
@@ -750,10 +796,46 @@ app.post('/api/update-offboarding-status', async (req, res) => {
         if (error) throw error;
 
         console.log(`Updated offboarding status for ${employee_id} to ${status}`);
+
+        await logAuditAction(
+            'OFFBOARDING',
+            'UPDATE_STATUS',
+            { employeeId: employee_id, status },
+            'SYSTEM',
+            employee_id
+        );
+
         res.json({ success: true, message: 'Status updated successfully' });
     } catch (error) {
         console.error('Error updating offboarding status:', error);
         res.status(500).json({ error: 'Failed to update status' });
+    }
+});
+
+app.delete('/api/offboarding-requests/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        // 1. Delete from Supabase
+        const { error } = await supabase
+            .from('offboarding_requests')
+            .delete()
+            .eq('id', id);
+
+        if (error) throw error;
+
+        // 2. Log Audit
+        await logAuditAction(
+            'OFFBOARDING',
+            'DELETE_REQUEST',
+            { requestId: id },
+            'ADMIN',
+            'N/A'
+        );
+
+        res.json({ message: 'Offboarding request deleted' });
+    } catch (error) {
+        console.error('Error deleting offboarding request:', error);
+        res.status(500).json({ error: 'Failed to delete request' });
     }
 });
 
@@ -1123,6 +1205,15 @@ app.delete('/api/applications/:id', async (req, res) => {
         }
 
         console.log(`[Delete] Application ${id} deleted successfully`);
+
+        await logAuditAction(
+            'DELETE_APPLICATION',
+            'DELETED_APPLICATION',
+            { applicationId: id, resumeUrl: appData?.resume_url },
+            'ADMIN',
+            'N/A'
+        );
+
         res.json({ message: 'Application deleted successfully' });
 
     } catch (error) {
@@ -1199,6 +1290,14 @@ app.post('/api/hire-application/:id', async (req, res) => {
         console.log(`Hiring email sent to ${application.email}`);
 
         res.json({ success: true, message: 'Candidate hired and email sent' });
+
+        await logAuditAction(
+            'HIRE_CANDIDATE',
+            'HIRED_APPLICATION',
+            { applicationId: id, jobId, status: 'hired' },
+            'ADMIN',
+            application.name
+        );
 
     } catch (error) {
         console.error('Error processing hire:', error);
