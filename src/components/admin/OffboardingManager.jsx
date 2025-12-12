@@ -241,7 +241,7 @@ const OffboardingManager = () => {
             // Trigger Power Automate Workflow
             try {
                 // Adjust payload source based on context (new vs edit)
-                const finalPayload = editingRequest ? {
+                const payloadBase = editingRequest ? {
                     employee_id: editingRequest.employee_id,
                     employee_name: editName,
                     resignation_date: resignationDate,
@@ -252,6 +252,14 @@ const OffboardingManager = () => {
                     resignation_date: resignationDate,
                     resignation_code: resignationCode
                 };
+
+                // Add email if available
+                const email = editingRequest ? editingRequest.employee_email : (foundUser?.mail || 'N/A');
+                const finalPayload = { ...payloadBase };
+
+                if (email && email !== 'N/A') {
+                    finalPayload.email = email;
+                }
 
                 await fetch('/api/trigger-offboarding-workflow', {
                     method: 'POST',

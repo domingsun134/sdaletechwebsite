@@ -812,6 +812,45 @@ app.post('/api/update-offboarding-status', async (req, res) => {
     }
 });
 
+// Endpoint for Power Automate to get list of resignees for today (Prosoft Updated)
+app.get('/api/offboarding/resignees/today', async (req, res) => {
+    try {
+        // Get today's date in YYYY-MM-DD format (Singapore Time +8)
+        // Adjust logic if server is already in local time or use UTC accordingly based on date storage
+        // Assuming database stores resignation_date as YYYY-MM-DD string
+        const today = new Date();
+        const offset = 8 * 60; // Singapore is UTC+8
+        const localTime = new Date(today.getTime() + (offset * 60 * 1000));
+        const dateString = localTime.toISOString().split('T')[0];
+
+        // Or if running on local machine in SG, just:
+        // const dateString = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+
+        // Safer approach for consistency across environments:
+        const sgDate = new Date().toLocaleString("en-US", { timeZone: "Asia/Singapore" });
+        const d = new Date(sgDate);
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const formattedDate = `${year}-${month}-${day}`;
+
+        console.log(`Fetching resignees for date: ${formattedDate} with status 'Prosoft Updated'`);
+
+        const { data, error } = await supabase
+            .from('offboarding_requests')
+            .select('employee_id, employee_name, employee_email')
+            .eq('resignation_date', formattedDate)
+            .eq('status', 'Prosoft Updated');
+
+        if (error) throw error;
+
+        res.json(data);
+    } catch (error) {
+        console.error('Error fetching today resignees:', error);
+        res.status(500).json({ error: 'Failed to fetch resignees' });
+    }
+});
+
 app.delete('/api/offboarding-requests/:id', async (req, res) => {
     try {
         const { id } = req.params;

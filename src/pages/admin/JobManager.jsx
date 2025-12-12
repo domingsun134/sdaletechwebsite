@@ -334,6 +334,10 @@ const JobManager = () => {
         }
 
         // Real analysis via server endpoint
+        // Reset error state and mark as analyzing
+        setApplications(prev => prev.map(a =>
+            a.id === app.id ? { ...a, analysisError: false } : a
+        ));
         setAnalyzingIds(prev => new Set(prev).add(app.id));
 
         try {
@@ -349,7 +353,7 @@ const JobManager = () => {
 
             // Update local state
             setApplications(prev => prev.map(a =>
-                a.id === app.id ? { ...a, analysis: analysisResult } : a
+                a.id === app.id ? { ...a, analysis: analysisResult, analysisError: false } : a
             ));
 
             // Open modal with new result
@@ -358,7 +362,10 @@ const JobManager = () => {
 
         } catch (error) {
             console.error("Analysis error:", error);
-            alert("Failed to analyze resume. Please try again.");
+            // Set error state instead of alerting
+            setApplications(prev => prev.map(a =>
+                a.id === app.id ? { ...a, analysisError: true } : a
+            ));
         } finally {
             setAnalyzingIds(prev => {
                 const next = new Set(prev);
@@ -1352,6 +1359,14 @@ const JobManager = () => {
                                                                 <td className="px-6 py-4 text-center">
                                                                     {analyzingIds.has(app.id) ? (
                                                                         <span className="text-slate-400 text-sm animate-pulse">Analyzing...</span>
+                                                                    ) : app.analysisError ? (
+                                                                        <button
+                                                                            onClick={() => handleAnalyze(app)}
+                                                                            className="px-3 py-1 rounded-full text-sm font-medium transition-colors bg-red-100 text-red-700 hover:bg-red-200"
+                                                                            title="Click to retry analysis"
+                                                                        >
+                                                                            Error (Retry)
+                                                                        </button>
                                                                     ) : app.analysis ? (
                                                                         (() => {
                                                                             const score = app.analysis.scores?.overall ?? app.analysis.score ?? 0;
