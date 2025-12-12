@@ -1,0 +1,74 @@
+[
+    {
+        "id": 1,
+        "title": "Senior Mould Designer",
+        "company": "Sunningdale Tech Ltd (HQ)",
+        "location": "Singapore",
+        "type": "Full-time",
+        "email": "hr@sdaletech.com",
+        "highlights": "Join a leading precision engineering company.\nWork with cutting-edge technology.",
+        "responsibilities": "Design complex plastic injection moulds.\nCollaborate with engineering teams.\nEnsure designs meet quality standards.",
+        "requirements": "Degree in Mechanical Engineering or related field.\n5+ years of experience in mould design.\nProficiency in CAD software.",
+        "career_level": "Senior Executive"
+    },
+    {
+        "id": 2,
+        "title": "QA Engineer",
+        "company": "Sunningdale Tech Penang Sdn Bhd",
+        "location": "Penang, Malaysia",
+        "type": "Full-time",
+        "email": "hr.my@sdaletech.com",
+        "highlights": "Key role in quality assurance.\nOpportunity for career growth.",
+        "responsibilities": "Ensure product quality standards are met.\nConduct rigorous testing and inspection.\nImplement ISO 9001 standards.",
+        "requirements": "Diploma/Degree in Engineering.\nExperience in QA/QC processes.\nKnowledge of ISO 9001.",
+        "career_level": "Junior Executive"
+    },
+    {
+        "id": 3,
+        "title": "Production Supervisor",
+        "company": "SDP Manufacturing SDN BHD",
+        "location": "Johor, Malaysia",
+        "type": "Full-time",
+        "email": "hr.my@sdaletech.com",
+        "highlights": "Lead a dynamic production team.\nCompetitive salary package.",
+        "responsibilities": "Oversee daily production operations.\nManage production staff and schedules.\nEnsure production targets are met efficiently.",
+        "requirements": "Experience in manufacturing supervision.\nStrong leadership and communication skills.\nAble to work shift hours.",
+        "career_level": "Manager"
+    },
+    {
+        "id": 4,
+        "title": "Sales Manager (Automotive)",
+        "company": "First Engineering (Shanghai) Co., Ltd",
+        "location": "Shanghai, China",
+        "type": "Full-time",
+        "email": "hr.cn@sdaletech.com",
+        "highlights": "Drive sales in the automotive sector.\nRegional exposure.",
+        "responsibilities": "Drive sales growth in the automotive sector.\nBuild and maintain strong relationships with clients.\nIdentify new business opportunities.",
+        "requirements": "Proven track record in automotive sales.\nStrong negotiation and presentation skills.\nFluent in English and Mandarin.",
+        "career_level": "Manager"
+    },
+    {
+        "id": 5,
+        "title": "IT Support Specialist",
+        "company": "Sunningdale Tech Ltd (HQ)",
+        "location": "Singapore",
+        "type": "Full-time",
+        "email": "it.hiring@sdaletech.com",
+        "highlights": "Support internal IT infrastructure.\nFriendly work environment.",
+        "responsibilities": "Provide technical support to internal users.\nTroubleshoot hardware and software issues.\nMaintain IT infrastructure and documentation.",
+        "requirements": "Diploma in IT or Computer Science.\nExperience in helpdesk support.\nKnowledge of Windows OS and networking.",
+        "career_level": "Junior Executive"
+    },
+    {
+        "id": 6,
+        "title": "Process Technician",
+        "company": "Sunningdale Tech Ltd (HQ)",
+        "location": "Singapore",
+        "type": "Shift Work",
+        "email": "hr@sdaletech.com",
+        "highlights": "Hands-on technical role.\nShift allowances provided.",
+        "responsibilities": "Set up and operate injection moulding machines.\nMonitor process parameters.\nTroubleshoot processing issues.",
+        "requirements": "NTC/NITEC in Precision Engineering.\nExperience in injection moulding is a plus.\nWilling to perform shift work.",
+        "career_level": "Non-Executive"
+    }
+]

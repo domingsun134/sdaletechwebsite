@@ -1,0 +1,20 @@
+[
+    {
+        "id": 1,
+        "title": "Annual Technology Summit 2025",
+        "date": "2025-03-15",
+        "endDate": "2025-03-17",
+        "location": "Singapore Expo",
+        "description": "Join us for our annual technology summit where we showcase our latest innovations in precision engineering and mould making.",
+        "image": "https://images.unsplash.com/photo-1540575467063-178a50c2df87?ixlib=rb-4.0.3&auto=format&fit=crop&w=2070&q=80"
+    },
+    {
+        "id": 2,
+        "title": "Community Outreach Program",
+        "date": "2025-04-20",
+        "endDate": "",
+        "location": "Jurong West Community Center",
+        "description": "Sunningdale Tech employees giving back to the community through our annual outreach program.",
+        "image": "https://images.unsplash.com/photo-1559027615-cd4628902d4a?ixlib=rb-4.0.3&auto=format&fit=crop&w=2074&q=80"
+    }
+]

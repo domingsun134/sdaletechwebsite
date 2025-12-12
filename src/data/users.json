@@ -1,0 +1,26 @@
+[
+    {
+        "id": 1,
+        "username": "sg2100271",
+        "password": "$2b$10$ngw5fA8Ly.eJUTFmSUvdHeI2EAyvrp4exQuN6WSBWrBqORJ0j6TzG",
+        "role": "admin",
+        "name": "Sun Lin Kang",
+        "email": "linkang.sun@sdaletech.com"
+    },
+    {
+        "id": 2,
+        "username": "hr",
+        "password": "$2b$10$gwzSxi6pYF2iYgNULj95xO74s0gXlWsy6laJ9PS0ZretdiVUGSHHv.",
+        "role": "hr",
+        "name": "HR Manager",
+        "email": "hr@sdaletech.com"
+    },
+    {
+        "id": 3,
+        "username": "marketing",
+        "password": "$2b$10$u4WQ7CCQQlIR3tNzDm/1NeHYo9tREjwOEe4/qpfggLnE1SaS68VVUm",
+        "role": "marketing",
+        "name": "Marketing Director",
+        "email": "marketing@sdaletech.com"
+    }
+]

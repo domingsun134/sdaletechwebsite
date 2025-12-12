@@ -1,0 +1,178 @@
+
+// --- Availability & Scheduling Endpoints ---
+
+const AVAILABILITY_KEY = 'availability.json';
+
+async function getAvailability() {
+    try {
+        const command = new GetObjectCommand({
+            Bucket: process.env.S3_BUCKET_NAME,
+            Key: AVAILABILITY_KEY
+        });
+        const response = await s3Client.send(command);
+        const str = await response.Body.transformToString();
+        return JSON.parse(str);
+    } catch (error) {
+        if (error.name === 'NoSuchKey') return [];
+        throw error;
+    }
+}
+
+async function saveAvailability(slots) {
+    const command = new PutObjectCommand({
+        Bucket: process.env.S3_BUCKET_NAME,
+        Key: AVAILABILITY_KEY,
+        Body: JSON.stringify(slots),
+        ContentType: 'application/json'
+    });
+    await s3Client.send(command);
+}
+
+// Get all availability slots
+app.get('/api/availability', async (req, res) => {
+    try {
+        const slots = await getAvailability();
+        // Optional: Filter by status if query param present
+        const { status } = req.query;
+        if (status) {
+            const filtered = slots.filter(s => s.status === status);
+            return res.json(filtered);
+        }
+        res.json(slots);
+    } catch (error) {
+        console.error('Error fetching availability:', error);
+        res.status(500).json({ error: 'Failed to fetch availability' });
+    }
+});
+
+// Add new availability slot
+app.post('/api/availability', async (req, res) => {
+    try {
+        const { startTime, endTime } = req.body;
+        if (!startTime || !endTime) {
+            return res.status(400).json({ error: 'Start and end time required' });
+        }
+
+        const slots = await getAvailability();
+        const newSlot = {
+            id: uuidv4(),
+            startTime,
+            endTime,
+            status: 'open',
+            bookedBy: null
+        };
+
+        slots.push(newSlot);
+        await saveAvailability(slots);
+
+        res.json(newSlot);
+    } catch (error) {
+        console.error('Error adding availability:', error);
+        res.status(500).json({ error: 'Failed to add availability' });
+    }
+});
+
+// Delete availability slot
+app.delete('/api/availability/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        let slots = await getAvailability();
+        slots = slots.filter(s => s.id !== id);
+        await saveAvailability(slots);
+        res.json({ message: 'Slot deleted' });
+    } catch (error) {
+        console.error('Error deleting availability:', error);
+        res.status(500).json({ error: 'Failed to delete availability' });
+    }
+});
+
+// Book an interview slot
+app.post('/api/book-interview', async (req, res) => {
+    try {
+        const { slotId, applicationId } = req.body;
+        
+        // 1. Get Slots
+        const slots = await getAvailability();
+        const slotIndex = slots.findIndex(s => s.id === slotId);
+        
+        if (slotIndex === -1) {
+            return res.status(404).json({ error: 'Slot not found' });
+        }
+        
+        if (slots[slotIndex].status !== 'open') {
+            return res.status(409).json({ error: 'Slot already booked' });
+        }
+
+        // 2. Get Application to get Name/Email
+        const appKey = `applications/${applicationId}.json`;
+        const appCommand = new GetObjectCommand({
+            Bucket: process.env.S3_BUCKET_NAME,
+            Key: appKey
+        });
+        const appResponse = await s3Client.send(appCommand);
+        const appData = JSON.parse(await appResponse.Body.transformToString());
+
+        // 3. Update Slot
+        slots[slotIndex].status = 'booked';
+        slots[slotIndex].bookedBy = {
+            applicationId,
+            name: appData.name,
+            email: appData.email
+        };
+        await saveAvailability(slots);
+
+        // 4. Update Application Status
+        appData.status = 'interview_scheduled';
+        appData.interviewSlotId = slotId;
+        appData.interviewTime = slots[slotIndex].startTime;
+        
+        await s3Client.send(new PutObjectCommand({
+            Bucket: process.env.S3_BUCKET_NAME,
+            Key: appKey,
+            Body: JSON.stringify(appData),
+            ContentType: 'application/json'
+        }));
+
+        // 5. Send Confirmation Emails (Admin & Candidate)
+        const interviewDate = new Date(slots[slotIndex].startTime).toLocaleString();
+        
+        // Email to Candidate
+        await transporter.sendMail({
+            from: process.env.SMTP_USER,
+            to: appData.email,
+            subject: `Interview Confirmed: ${appData.jobTitle} at Sunningdale Tech`,
+            html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                    <h3 style="color: #333;">Interview Confirmed</h3>
+                    <p>Dear ${appData.name},</p>
+                    <p>Your interview for <strong>${appData.jobTitle}</strong> has been confirmed.</p>
+                    <p><strong>Time:</strong> ${interviewDate}</p>
+                    <p>We look forward to meeting you.</p>
+                    <p>Best regards,<br>Sunningdale Tech HR Team</p>
+                </div>
+            `
+        });
+
+        // Email to Admin (Contact Email)
+        await transporter.sendMail({
+            from: process.env.SMTP_USER,
+            to: process.env.CONTACT_EMAIL,
+            subject: `New Interview Scheduled: ${appData.name}`,
+            html: `
+                <div style="font-family: Arial, sans-serif;">
+                    <h3>New Interview Scheduled</h3>
+                    <p><strong>Candidate:</strong> ${appData.name}</p>
+                    <p><strong>Position:</strong> ${appData.jobTitle}</p>
+                    <p><strong>Time:</strong> ${interviewDate}</p>
+                    <p>View in <a href="http://localhost:5173/admin/jobs">Admin Portal</a></p>
+                </div>
+            `
+        });
+
+        res.json({ message: 'Interview booked successfully' });
+
+    } catch (error) {
+        console.error('Error booking interview:', error);
+        res.status(500).json({ error: 'Failed to book interview' });
+    }
+});

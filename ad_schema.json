@@ -1,0 +1,61 @@
+{
+    "type": "object",
+    "properties": {
+        "employeeCode": {
+            "type": "string",
+            "description": "The unique employee ID (e.g. SG2500154)"
+        },
+        "firstName": {
+            "type": "string",
+            "description": "First Name"
+        },
+        "lastName": {
+            "type": "string",
+            "description": "Last Name"
+        },
+        "displayName": {
+            "type": "string",
+            "description": "Full Display Name"
+        },
+        "jobTitle": {
+            "type": "string",
+            "description": "Job Title"
+        },
+        "department": {
+            "type": "string",
+            "description": "Department Name"
+        },
+        "company": {
+            "type": "string",
+            "description": "Company Name"
+        },
+        "manager": {
+            "type": "string",
+            "description": "Manager's Email or Name"
+        },
+        "location": {
+            "type": "string",
+            "description": "Office Location"
+        },
+        "region": {
+            "type": "string",
+            "description": "Region Code (e.g. SG)"
+        },
+        "emailSuffix": {
+            "type": "string",
+            "description": "Email domain (e.g. @sdaletech.com)"
+        },
+        "distinguishedName": {
+            "type": "string",
+            "description": "Target OU Distinguished Name"
+        },
+        "ldapPath": {
+            "type": "string",
+            "description": "LDAP Path"
+        },
+        "initialPassword": {
+            "type": "string",
+            "description": "Default initial password"
+        }
+    }
+}
