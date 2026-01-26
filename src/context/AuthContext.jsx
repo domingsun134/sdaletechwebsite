@@ -1,5 +1,6 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import bcrypt from 'bcryptjs';
+import { useMsal, useIsAuthenticated } from "@azure/msal-react";
 
 const AuthContext = createContext();
 
@@ -16,6 +17,10 @@ export const AuthProvider = ({ children }) => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
+    // MSAL hooks
+    const { instance, accounts } = useMsal();
+    const isAuthenticatedMsal = useIsAuthenticated();
+
     // Fetch users from backend on mount
     useEffect(() => {
         fetchUsers();
@@ -23,7 +28,7 @@ export const AuthProvider = ({ children }) => {
 
     const fetchUsers = async () => {
         try {
-            const response = await fetch('http://localhost:3000/api/users');
+            const response = await fetch('/api/users');
             if (!response.ok) throw new Error('Failed to fetch users');
             const data = await response.json();
             setUsers(data);
@@ -35,16 +40,56 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
-    // Validate session on mount or when users change
+    // Validate session on mount or when users change (Local Auth)
     useEffect(() => {
-        if (user && !loading) {
+        if (user && !loading && !isAuthenticatedMsal) {
+            // Only validate against local users if not logged in via MSAL
             const userExists = users.find(u => u.username === user.username);
             if (!userExists) {
-                // User no longer exists in the database, force logout
-                logout();
+                // User no longer exists in the database, force logout (only if distinct from MSAL user)
+                // Note: MSAL user won't be in local DB likely, so we skip this check for them
+                if (!user.homeAccountId) { // Simple check if it's an MSAL account object
+                    logout();
+                }
             }
         }
-    }, [users, user, loading]);
+    }, [users, user, loading, isAuthenticatedMsal]);
+
+    // Sync MSAL Auth
+    useEffect(() => {
+        // Wait for users to be loaded before checking auth
+        if (loading) return;
+
+        if (isAuthenticatedMsal && accounts.length > 0) {
+            const msalAccount = accounts[0];
+            const email = msalAccount.username;
+
+            const dbUser = users.find(u =>
+                u.azure_oid === msalAccount.homeAccountId ||
+                u.username.toLowerCase() === email.toLowerCase() ||
+                u.email?.toLowerCase() === email.toLowerCase()
+            );
+
+            if (dbUser) {
+                setUser({
+                    ...dbUser,
+                    homeAccountId: msalAccount.homeAccountId
+                });
+                setError(null); // Clear any previous login error
+            } else {
+                // User not found in DB - Deny Access
+                console.warn('Unauthorized Entra login attempt:', email);
+                setUser(null); // Ensure user is null if not found in DB
+                setError('You do not have permission to access the admin portal. Please contact an administrator.');
+
+                // Optional: Logout of MSAL context to prevent auto-login loop on refresh?
+                // If we don't logout, this effect runs again. 
+                // But we set User(null), so app stays on Login.
+                // However, isAuthenticatedMsal is still true.
+                // So this effect will keep hitting "else" and setting error. That's acceptable.
+            }
+        }
+    }, [isAuthenticatedMsal, accounts, users, loading]);
 
     // Role Permissions Management
     const defaultPermissions = {
@@ -77,8 +122,10 @@ export const AuthProvider = ({ children }) => {
             setUser(userWithoutPassword);
             localStorage.setItem('user', JSON.stringify(userWithoutPassword));
             localStorage.setItem('isAuthenticated', 'true'); // Keep for backward compatibility if needed
+            setError(null); // Clear any previous login error
             return true;
         }
+        setError('Invalid username or password.'); // Set error for local login failure
         return false;
     };
 
@@ -86,18 +133,23 @@ export const AuthProvider = ({ children }) => {
         setUser(null);
         localStorage.removeItem('user');
         localStorage.removeItem('isAuthenticated');
+        setError(null); // Clear error on logout
+        if (isAuthenticatedMsal) {
+            instance.logoutRedirect();
+        }
     };
 
     // User Management Functions
     const addUser = async (newUser) => {
         try {
-            // Hash the password before sending to API (or API could do it, but let's keep it here for now as per previous logic)
-            // Actually, usually backend hashes it. But to minimize backend logic change, we'll hash here.
-            // Wait, if we send hashed password, backend just stores it.
-            const hashedPassword = bcrypt.hashSync(newUser.password, 10);
-            const userToSend = { ...newUser, password: hashedPassword };
+            // Hash the password only if it exists (local users)
+            let userToSend = { ...newUser };
+            if (newUser.password) {
+                const hashedPassword = bcrypt.hashSync(newUser.password, 10);
+                userToSend.password = hashedPassword;
+            }
 
-            const response = await fetch('http://localhost:3000/api/users', {
+            const response = await fetch('/api/users', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(userToSend)
@@ -119,7 +171,7 @@ export const AuthProvider = ({ children }) => {
 
     const updateUser = async (id, updatedData) => {
         try {
-            const response = await fetch(`http://localhost:3000/api/users/${id}`, {
+            const response = await fetch(`/api/users/${id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(updatedData)
@@ -137,7 +189,7 @@ export const AuthProvider = ({ children }) => {
 
     const deleteUser = async (id) => {
         try {
-            const response = await fetch(`http://localhost:3000/api/users/${id}`, {
+            const response = await fetch(`/api/users/${id}`, {
                 method: 'DELETE'
             });
 
@@ -155,6 +207,7 @@ export const AuthProvider = ({ children }) => {
             user,
             isAuthenticated: !!user,
             loading,
+            error, // Expose error state
             login,
             logout,
             users,

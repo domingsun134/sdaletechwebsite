@@ -11,7 +11,7 @@ export const EventProvider = ({ children }) => {
 
     const fetchEvents = async () => {
         try {
-            const response = await fetch('http://localhost:3000/api/events');
+            const response = await fetch('/api/events');
             if (!response.ok) throw new Error('Failed to fetch events');
             const data = await response.json();
             setEvents(data);
@@ -30,7 +30,7 @@ export const EventProvider = ({ children }) => {
 
     const addEvent = async (event) => {
         try {
-            const response = await fetch('http://localhost:3000/api/events', {
+            const response = await fetch('/api/events', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(event)
@@ -47,7 +47,7 @@ export const EventProvider = ({ children }) => {
 
     const updateEvent = async (id, updatedEvent) => {
         try {
-            const response = await fetch(`http://localhost:3000/api/events/${id}`, {
+            const response = await fetch(`/api/events/${id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(updatedEvent)
@@ -64,7 +64,7 @@ export const EventProvider = ({ children }) => {
 
     const deleteEvent = async (id) => {
         try {
-            const response = await fetch(`http://localhost:3000/api/events/${id}`, {
+            const response = await fetch(`/api/events/${id}`, {
                 method: 'DELETE'
             });
             if (!response.ok) throw new Error('Failed to delete event');

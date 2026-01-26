@@ -13,7 +13,7 @@ const ResumeAnalysisModal = ({ isOpen, onClose, analysis, candidateName, jobTitl
     const handleGenerateQuestions = async () => {
         setIsGeneratingQuestions(true);
         try {
-            const response = await fetch(`http://localhost:3000/api/generate-questions/${applicationId}`, {
+            const response = await fetch(`/api/generate-questions/${applicationId}`, {
                 method: 'POST'
             });
             if (response.ok) {

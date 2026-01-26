@@ -20,6 +20,8 @@ import Contact from './pages/Contact';
 import Career from './pages/Career';
 import JobOpportunities from './pages/JobOpportunities';
 import JobDetails from './pages/JobDetails';
+import Internships from './pages/Internships';
+import TalentCommunity from './pages/TalentCommunity';
 
 import { AuthProvider } from './context/AuthContext';
 import { ContentProvider } from './context/ContentContext';
@@ -115,6 +117,8 @@ function App() {
                 <Route path="careers" element={<Career />} />
                 <Route path="careers/job-opportunities" element={<JobOpportunities />} />
                 <Route path="careers/job-opportunities/:id" element={<JobDetails />} />
+                <Route path="careers/internships" element={<Internships />} />
+                <Route path="careers/talent-community" element={<TalentCommunity />} />
                 <Route path="investor-relations" element={<InvestorRelations />} />
                 <Route path="*" element={<div className="p-20 text-center">Page Not Found</div>} />
               </Route>

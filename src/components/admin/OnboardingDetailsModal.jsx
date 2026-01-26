@@ -121,7 +121,7 @@ const OnboardingDetailsModal = ({ isOpen, onClose, data, isLoading, onUpdate, ca
         if (!query) return;
         setIsSearchingManager(true);
         try {
-            const response = await fetch('http://localhost:3000/api/entra-users', {
+            const response = await fetch('/api/entra-users', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ search: query })
@@ -164,7 +164,7 @@ const OnboardingDetailsModal = ({ isOpen, onClose, data, isLoading, onUpdate, ca
 
             // Trigger AD Provisioning
             try {
-                const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/integrations/ad/provision`, {
+                const response = await fetch(`/api/integrations/ad/provision`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ applicationId: data.application_id })

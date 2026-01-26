@@ -170,6 +170,13 @@ const CandidateOnboarding = () => {
 
             if (insertError) throw insertError;
 
+            // Trigger Email Notification (Non-blocking)
+            fetch('/api/notify-onboarding-submission', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ applicationId })
+            }).catch(err => console.error('Failed to trigger notification:', err));
+
             setSubmitted(true);
             window.scrollTo(0, 0);
 

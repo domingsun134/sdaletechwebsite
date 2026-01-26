@@ -9,11 +9,18 @@ import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import tls from 'tls';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Bypass SSL verification for Supabase connection (Self-signed certificate issue)
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 dotenv.config();
+
+// Enforce modern TLS
+tls.DEFAULT_MIN_VERSION = 'TLSv1.2';
 
 
 
@@ -83,7 +90,6 @@ async function logAuditAction(category, action, details, performedBy = 'SYSTEM',
     }
 }
 
-// ... existing code ...
 
 // API to fetch audit logs
 app.get('/api/audit-logs', async (req, res) => {
@@ -112,8 +118,7 @@ const transporter = nodemailer.createTransport({
         pass: process.env.SMTP_PASS
     },
     tls: {
-        ciphers: 'SSLv3',
-        rejectUnauthorized: false
+        minVersion: 'TLSv1.2'
     }
 });
 
@@ -127,7 +132,7 @@ app.post('/api/contact', async (req, res) => {
 
     const mailOptions = {
         from: process.env.SMTP_USER, // Sender address
-        to: process.env.CONTACT_EMAIL || 'linkang.sun@sdaletech.com', // Receiver address
+        to: process.env.SMTP_USER || 'stl-workflow@sdaletech.com', // Receiver address
         subject: `[Website Enquiry] ${subject}: ${name}`,
         text: `
             Name: ${name}
@@ -277,7 +282,7 @@ app.post('/api/apply', upload.single('resume'), async (req, res) => {
         // 3. Send Email Notification
         const mailOptions = {
             from: process.env.SMTP_USER,
-            to: recipient || process.env.CONTACT_EMAIL || 'linkang.sun@sdaletech.com',
+            to: recipient || process.env.SMTP_USER || 'stl-workflow@sdaletech.com',
             subject: `[Job Application] ${jobTitle}: ${name}`,
             text: `
                 New Job Application for ${jobTitle}
@@ -452,54 +457,24 @@ app.delete('/api/jobs/:id', async (req, res) => {
 });
 
 // User Management Routes
-const USERS_S3_KEY = 'users/users.json';
+// Using Supabase directly instead of S3
 
-// Helper to get users from S3 or fallback to local file
-async function getUsersFromS3() {
-    try {
-        if (!process.env.S3_BUCKET_NAME) {
-            console.warn('S3_BUCKET_NAME not set, falling back to local file');
-            throw new Error('S3 not configured');
-        }
+// Helper to get users from Supabase
+async function getUsersFromSupabase() {
+    const { data, error } = await supabase
+        .from('users')
+        .select('*');
 
-        const command = new GetObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME,
-            Key: USERS_S3_KEY
-        });
-        const response = await s3Client.send(command);
-        const str = await response.Body.transformToString();
-        return JSON.parse(str);
-    } catch (error) {
-        // If file doesn't exist in S3 or S3 error, fallback to local initial data
-        console.log('Fetching users from S3 failed or file missing, using default data:', error.message);
-        try {
-            const localPath = path.join(__dirname, 'src', 'data', 'users.json');
-            const data = fs.readFileSync(localPath, 'utf8');
-            return JSON.parse(data);
-        } catch (localError) {
-            console.error('Failed to read local users.json:', localError);
-            return [];
-        }
+    if (error) {
+        console.error('Supabase fetch users error:', error);
+        throw error;
     }
-}
-
-// Helper to save users to S3
-async function saveUsersToS3(users) {
-    if (!process.env.S3_BUCKET_NAME) {
-        throw new Error('S3_BUCKET_NAME not configured');
-    }
-
-    await s3Client.send(new PutObjectCommand({
-        Bucket: process.env.S3_BUCKET_NAME,
-        Key: USERS_S3_KEY,
-        Body: JSON.stringify(users, null, 2),
-        ContentType: 'application/json'
-    }));
+    return data || [];
 }
 
 app.get('/api/users', async (req, res) => {
     try {
-        const users = await getUsersFromS3();
+        const users = await getUsersFromSupabase();
         res.json(users);
     } catch (error) {
         console.error('Error fetching users:', error);
@@ -510,26 +485,59 @@ app.get('/api/users', async (req, res) => {
 app.post('/api/users', async (req, res) => {
     try {
         const newUser = req.body;
-        if (!newUser.username || !newUser.password) {
-            return res.status(400).json({ error: 'Username and Password are required' });
+
+        // Validation:
+        // If it's a local user, need username/password.
+        // If it's an Entra user (has azure_oid), password might be empty.
+
+        if (!newUser.username) {
+            return res.status(400).json({ error: 'Username is required' });
         }
 
-        // Ensure ID
-        if (!newUser.id) {
-            newUser.id = Date.now();
+        if (!newUser.azure_oid && !newUser.password) {
+            return res.status(400).json({ error: 'Password is required for local users' });
         }
 
-        const users = await getUsersFromS3();
+        // Check if username already exists in Supabase
+        const { data: existingUsers } = await supabase
+            .from('users')
+            .select('id')
+            .eq('username', newUser.username);
 
-        // Check if username already exists
-        if (users.find(u => u.username === newUser.username)) {
+        if (existingUsers && existingUsers.length > 0) {
             return res.status(400).json({ error: 'Username already exists' });
         }
 
-        users.push(newUser);
+        // If Entra user, check if OID exists
+        if (newUser.azure_oid) {
+            const { data: existingOid } = await supabase
+                .from('users')
+                .select('id')
+                .eq('azure_oid', newUser.azure_oid);
+            if (existingOid && existingOid.length > 0) {
+                return res.status(400).json({ error: 'User already exists (Entra ID linked)' });
+            }
+        }
 
-        await saveUsersToS3(users);
-        res.status(201).json(newUser);
+        // Insert into Supabase
+        const { data, error } = await supabase
+            .from('users')
+            .insert([{
+                username: newUser.username,
+                password: newUser.password || null,
+                name: newUser.name,
+                role: newUser.role || 'hr',
+                email: newUser.email,
+                azure_oid: newUser.azure_oid || null,
+                company_name: newUser.company_name || null
+            }])
+            .select();
+
+        if (error) {
+            throw error;
+        }
+
+        res.status(201).json(data[0]);
     } catch (error) {
         console.error('Error creating user:', error);
         res.status(500).json({ error: 'Failed to create user' });
@@ -540,18 +548,17 @@ app.put('/api/users/:id', async (req, res) => {
     try {
         const { id } = req.params;
         const updatedUser = req.body;
-        const users = await getUsersFromS3();
 
-        const index = users.findIndex(u => u.id == id);
-        if (index === -1) {
-            return res.status(404).json({ error: 'User not found' });
-        }
+        const { data, error } = await supabase
+            .from('users')
+            .update(updatedUser)
+            .eq('id', id)
+            .select();
 
-        // Preserve ID and update fields
-        users[index] = { ...users[index], ...updatedUser, id: users[index].id };
+        if (error) throw error;
+        if (!data || data.length === 0) return res.status(404).json({ error: 'User not found' });
 
-        await saveUsersToS3(users);
-        res.json(users[index]);
+        res.json(data[0]);
     } catch (error) {
         console.error('Error updating user:', error);
         res.status(500).json({ error: 'Failed to update user' });
@@ -561,22 +568,423 @@ app.put('/api/users/:id', async (req, res) => {
 app.delete('/api/users/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        let users = await getUsersFromS3();
+        const { error } = await supabase
+            .from('users')
+            .delete()
+            .eq('id', id);
 
-        const initialLength = users.length;
-        users = users.filter(u => u.id != id);
+        if (error) throw error;
 
-        if (users.length === initialLength) {
-            return res.status(404).json({ error: 'User not found' });
-        }
-
-        await saveUsersToS3(users);
         res.json({ message: 'User deleted successfully' });
     } catch (error) {
         console.error('Error deleting user:', error);
         res.status(500).json({ error: 'Failed to delete user' });
     }
 });
+
+// --- Azure / Teams Integration Helpers ---
+
+let azureTokenCache = {
+    token: null,
+    expiresAt: 0
+};
+
+async function getAzureAccessToken() {
+    const now = Date.now();
+    if (azureTokenCache.token && azureTokenCache.expiresAt > now) {
+        return azureTokenCache.token;
+    }
+
+    const tenantId = process.env.AZURE_TENANT_ID;
+    const clientId = process.env.AZURE_CLIENT_ID;
+    const clientSecret = process.env.AZURE_CLIENT_SECRET;
+
+    if (!tenantId || !clientId || !clientSecret) {
+        throw new Error('Azure configuration missing (AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET)');
+    }
+
+    console.log('[Azure] Fetching new access token...');
+    const tokenResponse = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+            client_id: clientId,
+            scope: 'https://graph.microsoft.com/.default',
+            client_secret: clientSecret,
+            grant_type: 'client_credentials',
+        }),
+    });
+
+    if (!tokenResponse.ok) {
+        const errorText = await tokenResponse.text();
+        console.error('Failed to get Azure token:', errorText);
+        throw new Error(`Failed to authenticate with Azure: ${errorText}`);
+    }
+
+    const tokenData = await tokenResponse.json();
+    // Cache token (subtract 5 mins for safety buffer)
+    azureTokenCache = {
+        token: tokenData.access_token,
+        expiresAt: now + (tokenData.expires_in * 1000) - (5 * 60 * 1000)
+    };
+
+    return tokenData.access_token;
+}
+
+async function createTeamsMeeting(subject, startTime, endTime) {
+    try {
+        console.log('[Teams] Attempting to create online meeting...');
+        const accessToken = await getAzureAccessToken();
+
+        // 1. Identify the Organizer
+        // Use SMTP_USER exclusively as requested
+        const organizerEmail = process.env.SMTP_USER || 'stl-workflow@sdaletech.com';
+
+        console.log(`[Teams] Looking up organizer ID for: ${organizerEmail}`);
+        const userResponse = await fetch(`https://graph.microsoft.com/v1.0/users/${organizerEmail}`, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+
+        if (!userResponse.ok) {
+            console.warn(`[Teams] Organizer lookup failed for ${organizerEmail}: ${userResponse.status}`);
+            // Fallback: Try looking up by UPN if email failed, or just fail gracefully
+            throw new Error(`Organizer user not found: ${organizerEmail}`);
+        }
+
+        const organizer = await userResponse.json();
+        const organizerId = organizer.id;
+
+        // 2. Create Online Meeting
+        // POST /users/{id}/onlineMeetings
+        const meetingPayload = {
+            startDateTime: startTime, // ISO 8601
+            endDateTime: endTime,
+            subject: subject,
+            // lobbyBypassSettings: { scope: 'everyone' } // Optional: allow everyone to join directly
+        };
+
+        const meetingResponse = await fetch(`https://graph.microsoft.com/v1.0/users/${organizerId}/onlineMeetings`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(meetingPayload)
+        });
+
+        if (!meetingResponse.ok) {
+            const err = await meetingResponse.text();
+            throw new Error(`Meeting creation failed: ${meetingResponse.status} ${err}`);
+        }
+
+        const meetingData = await meetingResponse.json();
+        console.log(`[Teams] Meeting created successfully! Join URL: ${meetingData.joinWebUrl}`);
+
+        return {
+            joinUrl: meetingData.joinWebUrl,
+            id: meetingData.id
+        };
+
+    } catch (error) {
+        console.error('[Teams] Failed to create Teams meeting:', error.message);
+        // Return null to allow fallback to static text
+        return null;
+    }
+}
+
+// --- Room Integration Endpoints ---
+
+app.get('/api/integrations/rooms', async (req, res) => {
+    try {
+        const accessToken = await getAzureAccessToken();
+
+        // Fetch rooms from Graph API
+        // Note: Requires Place.Read.All permission
+        // List all rooms in the tenant
+        console.log('[Rooms] Fetching rooms from Azure...');
+        const response = await fetch('https://graph.microsoft.com/v1.0/places/microsoft.graph.room', {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+
+        if (!response.ok) {
+            const err = await response.text();
+            console.error('[Rooms] Failed to fetch rooms:', err);
+            throw new Error(`Failed to fetch rooms: ${response.status}`);
+        }
+
+        const data = await response.json();
+        // data.value contains the list of rooms
+
+        const rooms = data.value.map(room => ({
+            id: room.id,
+            name: room.displayName,
+            email: room.emailAddress,
+            capacity: room.capacity,
+            building: room.address?.buildingStr
+        }));
+
+        res.json(rooms);
+
+    } catch (error) {
+        console.error('[Rooms] Error:', error);
+        res.status(500).json({ error: 'Failed to list rooms' });
+    }
+});
+
+app.post('/api/integrations/rooms/availability', async (req, res) => {
+    try {
+        const { roomEmail, startTime, endTime } = req.body;
+        if (!roomEmail || !startTime || !endTime) {
+            return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        const accessToken = await getAzureAccessToken();
+
+        // Check availability using getSchedule
+        // POST /users/{roomEmail}/calendar/getSchedule
+        // Requires Calendars.Read.Shared
+        const payload = {
+            schedules: [roomEmail],
+            startTime: {
+                dateTime: startTime,
+                timeZone: "Asia/Singapore"
+            },
+            endTime: {
+                dateTime: endTime,
+                timeZone: "Asia/Singapore"
+            },
+            availabilityViewInterval: 15 // Check in 15 min blocks
+        };
+
+        const response = await fetch(`https://graph.microsoft.com/v1.0/users/${roomEmail}/calendar/getSchedule`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'outlook.timezone="Asia/Singapore"'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            // Fallback: Try /calendars/{roomEmail}/getSchedule if /users/... fails 
+            // (sometimes rooms aren't fully treated as users for this endpoint depending on permissions)
+            console.warn(`[Rooms] getSchedule failed for ${roomEmail} via /users endpoint. Status: ${response.status}`);
+
+            // Just fail for now, implementing robust fallback needs more logic
+            const err = await response.text();
+            throw new Error(`Failed to check availability: ${err}`);
+        }
+
+        const data = await response.json();
+        const schedule = data.value[0];
+
+        // Check if there are any items in scheduleItems that overlap or status is not 'free'
+        // 'availabilityView' string is also useful (0=free, 1=tentative, 2=busy, 3=ood, 4=workingElsewhere)
+
+        const isBusy = schedule.scheduleItems && schedule.scheduleItems.some(item => {
+            // Simple overlap check is done by Graph API returning items in the window
+            // If status is busy or tentative, it's occupied
+            return item.status === 'busy' || item.status === 'tentative';
+        });
+
+        // Also check availabilityView string just in case
+        const availabilityView = schedule.availabilityView;
+        const isFreeInView = !availabilityView.includes('2') && !availabilityView.includes('1'); // 2 is busy
+
+        res.json({
+            available: !isBusy && isFreeInView,
+            details: schedule
+        });
+
+    } catch (error) {
+        console.error('[Rooms] Availability Error:', error);
+        res.status(500).json({ error: 'Failed to check room availability' });
+    }
+});
+
+app.post('/api/integrations/rooms/find-available', async (req, res) => {
+    try {
+        const { startTime, endTime } = req.body;
+        if (!startTime || !endTime) {
+            return res.status(400).json({ error: 'Missing start/end time' });
+        }
+
+        const accessToken = await getAzureAccessToken();
+
+        // 1. Get All Rooms
+        console.log('[Rooms] Finding available rooms (Entra Places)...');
+        const roomsResponse = await fetch('https://graph.microsoft.com/v1.0/places/microsoft.graph.room', {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+
+        if (!roomsResponse.ok) {
+            throw new Error('Failed to fetch room list: ' + roomsResponse.statusText);
+        }
+
+        const roomsData = await roomsResponse.json();
+
+        // --- LOGGING ALL DETAILS AS REQUESTED ---
+        // --- LOGGING ALL DETAILS AS REQUESTED ---
+        console.log('[Rooms] Raw Data (First 3 items):');
+        if (roomsData.value && roomsData.value.length > 0) {
+            // 1. Log first 3 for general context
+            roomsData.value.slice(0, 3).forEach((room, i) => {
+                console.log(`--- Room ${i + 1} ---`);
+                console.log(JSON.stringify(room, null, 2));
+            });
+
+            // 2. HUNT for the specific "bad" room to see its properties
+            const badRoom = roomsData.value.find(r => r.displayName.includes('Driver') || r.name?.includes('Driver'));
+            if (badRoom) {
+                console.log('\n!!! FOUND SUSPICIOUS ROOM (Driver) !!!');
+                console.log(JSON.stringify(badRoom, null, 2));
+                console.log('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n');
+            } else {
+                console.log('[Rooms] Could not find any room with "Driver" in name in the raw list.');
+            }
+        } else {
+            console.log('[Rooms] No rooms found in raw response.');
+        }
+        // ----------------------------------------
+
+        const allRooms = roomsData.value.map(r => ({
+            id: r.id,
+            name: r.displayName,
+            email: r.emailAddress,
+            capacity: r.capacity,
+            building: r.address?.buildingStr,
+            address: r.address,
+            bookingType: r.bookingType // Capture booking type
+        }));
+
+        if (allRooms.length === 0) {
+            return res.json([]);
+        }
+
+        // 2. Filter by Country (Singapore) AND "Meeting Room" criteria
+        const sgRooms = allRooms.filter(r => {
+            const country = r.address?.countryOrRegion || '';
+            const city = r.address?.city || '';
+
+            const isSingapore = (country.toLowerCase().includes('singapore') || country.toLowerCase() === 'sg') ||
+                (city.toLowerCase().includes('singapore'));
+
+            // Filter 1: Booking Type should be 'standard' (Resource Mailbox usually)
+            const isStandard = r.bookingType === 'standard';
+
+            // Filter 2: Name blacklist (User requested to remove "Driver Booking")
+            const isNotDriver = !r.name.toLowerCase().includes('driver');
+
+            // Log details for the rooms user asked about to debug differences
+            if (r.name.includes('India Meeting Room') || r.name.includes('Driver')) {
+                console.log(`[DEBUG-FILTER] Checking: ${r.name}`);
+                console.log(`   - Is Singapore: ${isSingapore}`);
+                console.log(`   - BookingType: ${r.bookingType} (Pass? ${isStandard})`);
+                console.log(`   - Is Not Driver: ${isNotDriver}`);
+                // FULL DUMP FOR COMPARISON
+                console.log(JSON.stringify(r, null, 2));
+            }
+
+            return isSingapore && isStandard && isNotDriver;
+        });
+
+        console.log(`[Rooms] Filtered: ${sgRooms.length} rooms found (Singapore + Standard + No Driver).`);
+
+        if (sgRooms.length === 0) {
+            console.log('[Rooms] No matching rooms found. Returning empty.');
+            return res.json([]);
+        }
+
+        // 3. Batch Check Availability
+        console.log('[Rooms] Checking availability for SG rooms...');
+        const roomEmails = sgRooms.map(r => r.email);
+
+        const payload = {
+            schedules: roomEmails,
+            startTime: {
+                dateTime: startTime,
+                timeZone: "Asia/Singapore"
+            },
+            endTime: {
+                dateTime: endTime,
+                timeZone: "Asia/Singapore"
+            },
+            availabilityViewInterval: 15
+        };
+
+        const scheduleResponse = await fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(process.env.CONTACT_EMAIL || roomEmails[0])}/calendar/getSchedule`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'outlook.timezone="Asia/Singapore"'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!scheduleResponse.ok) {
+            const txt = await scheduleResponse.text();
+            console.warn('[Rooms] Bulk availability check failed:', txt);
+            // Fallback: return sgRooms without availability check
+            return res.json(sgRooms);
+        }
+
+        const scheduleData = await scheduleResponse.json();
+        const schedules = scheduleData.value;
+
+        // 4. Filter Available Rooms
+        const availableRooms = sgRooms.filter(room => {
+            const roomSchedule = schedules.find(s => s.scheduleId === room.email);
+            if (!roomSchedule) return true;
+
+            const hasConflict = roomSchedule.scheduleItems && roomSchedule.scheduleItems.some(item =>
+                item.status === 'busy' || item.status === 'tentative'
+            );
+
+            return !hasConflict;
+        });
+
+        console.log(`[Rooms] Returning ${availableRooms.length} available rooms.`);
+        res.json(availableRooms);
+
+    } catch (error) {
+        console.error('[Rooms] Find Available Error:', error);
+        res.status(500).json({ error: 'Failed to find available rooms' });
+    }
+});
+
+// NEW: Endpoint to check Exchange Room Lists
+app.get('/api/integrations/rooms/exchange/lists', async (req, res) => {
+    try {
+        const accessToken = await getAzureAccessToken();
+        const userEmail = process.env.CONTACT_EMAIL;
+
+        console.log('[Exchange] Fetching Room Lists for:', userEmail);
+        if (!userEmail) return res.status(400).json({ error: 'CONTACT_EMAIL not set' });
+
+        const response = await fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(userEmail)}/findRoomLists`, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+
+        if (!response.ok) {
+            const txt = await response.text();
+            console.error('[Exchange] Failed to fetch room lists:', txt);
+            return res.status(response.status).json({ error: txt });
+        }
+
+        const data = await response.json();
+        console.log('[Exchange] Room Lists:', JSON.stringify(data, null, 2));
+        res.json(data);
+    } catch (error) {
+        console.error('[Exchange] Error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+
 
 app.post('/api/entra-users', async (req, res) => {
     try {
@@ -585,44 +993,21 @@ app.post('/api/entra-users', async (req, res) => {
             return res.json([]);
         }
 
-        const tenantId = process.env.AZURE_TENANT_ID;
-        const clientId = process.env.AZURE_CLIENT_ID;
-        const clientSecret = process.env.AZURE_CLIENT_SECRET;
-
-        if (!tenantId || !clientId || !clientSecret) {
-            console.error('Azure credentials missing');
-            // Fallback to local users if Azure is not configured, to prevent breaking the UI
-            // But the user specifically asked for Entra ID, so maybe just return error or empty?
-            // Let's return error so they know to configure it.
-            return res.status(500).json({ error: 'Azure configuration missing' });
+        // Refactored to use helper
+        let accessToken;
+        try {
+            accessToken = await getAzureAccessToken();
+        } catch (e) {
+            console.error('Azure setup issue:', e);
+            return res.status(500).json({ error: 'Azure configuration missing or invalid' });
         }
 
-        // 1. Get Access Token
-        const tokenResponse = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: new URLSearchParams({
-                client_id: clientId,
-                scope: 'https://graph.microsoft.com/.default',
-                client_secret: clientSecret,
-                grant_type: 'client_credentials',
-            }),
-        });
 
-        if (!tokenResponse.ok) {
-            const errorText = await tokenResponse.text();
-            console.error('Failed to get Azure token:', errorText);
-            throw new Error('Failed to authenticate with Azure');
-        }
 
-        const tokenData = await tokenResponse.json();
-        const accessToken = tokenData.access_token;
 
         // 2. Search Users
         // Using $filter for startsWith
-        const graphUrl = `https://graph.microsoft.com/v1.0/users?$filter=startswith(displayName,'${search}')&$select=id,displayName,mail,jobTitle&$top=10`;
+        const graphUrl = `https://graph.microsoft.com/v1.0/users?$filter=startswith(displayName,'${search}')&$select=id,displayName,mail,jobTitle,companyName&$top=10`;
 
         const userResponse = await fetch(graphUrl, {
             headers: {
@@ -653,37 +1038,12 @@ app.post('/api/entra-user-by-id', async (req, res) => {
             return res.status(400).json({ error: 'Employee ID is required' });
         }
 
-        const tenantId = process.env.AZURE_TENANT_ID;
-        const clientId = process.env.AZURE_CLIENT_ID;
-        const clientSecret = process.env.AZURE_CLIENT_SECRET;
-
-        if (!tenantId || !clientId || !clientSecret) {
-            console.error('Azure credentials missing');
-            return res.status(500).json({ error: 'Azure configuration missing' });
+        let accessToken;
+        try {
+            accessToken = await getAzureAccessToken();
+        } catch (e) {
+            return res.status(500).json({ error: 'Azure auth failed' });
         }
-
-        // 1. Get Access Token
-        const tokenResponse = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: new URLSearchParams({
-                client_id: clientId,
-                scope: 'https://graph.microsoft.com/.default',
-                client_secret: clientSecret,
-                grant_type: 'client_credentials',
-            }),
-        });
-
-        if (!tokenResponse.ok) {
-            const errorText = await tokenResponse.text();
-            console.error('Failed to get Azure token:', errorText);
-            throw new Error('Failed to authenticate with Azure');
-        }
-
-        const tokenData = await tokenResponse.json();
-        const accessToken = tokenData.access_token;
 
         // 2. Search User by Employee ID
         // Note: employeeId property might vary in Graph. Usually it's `employeeId`.
@@ -1404,6 +1764,81 @@ app.post('/api/resend-onboarding-email', async (req, res) => {
     }
 });
 
+app.post('/api/notify-onboarding-submission', async (req, res) => {
+    try {
+        const { applicationId } = req.body;
+        const APP_URL = process.env.APP_URL || 'http://localhost:5173';
+
+        if (!applicationId) {
+            return res.status(400).json({ error: 'Application ID is required' });
+        }
+
+        // 1. Fetch Application Details
+        const { data: application, error: fetchError } = await supabase
+            .from('applications')
+            .select('*')
+            .eq('id', applicationId)
+            .single();
+
+        if (fetchError || !application) throw new Error('Application not found');
+
+        // 2. Fetch Job Details to get Notification Email
+        const { data: jobData, error: jobError } = await supabase
+            .from('jobs')
+            .select('*')
+            .ilike('title', application.job_title)
+            .maybeSingle();
+
+        if (jobError) console.error('Error fetching job details:', jobError);
+
+        const notificationEmail = jobData?.email || process.env.SMTP_USER || 'stl-workflow@sdaletech.com';
+        const hiringManagerEmail = jobData?.hiring_manager_email;
+
+        // 3. Prepare Recipients
+        const recipients = [notificationEmail];
+        // Optional: Include Hiring Manager if needed/desired, user said "notification email will do" but good to be robust?
+        // User strictly said "send to notification email will do", so let's stick to that to avoid spamming managers if not asked.
+        // Actually, let's just send to notification email as requested.
+
+        // 4. Send Email
+        const onboardingDashboardLink = `${APP_URL}/admin/jobs?tab=onboarding`; // Direct to onboarding tab
+
+        const mailOptions = {
+            from: process.env.SMTP_USER,
+            to: notificationEmail,
+            subject: `Onboarding Submitted: ${application.name} (${application.job_title})`,
+            html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                    <h2 style="color: #2563eb;">Onboarding Submitted</h2>
+                    <p><strong>Candidate:</strong> ${application.name}</p>
+                    <p><strong>Position:</strong> ${application.job_title}</p>
+                    <p>The candidate has successfully submitted their onboarding information.</p>
+                    
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="${onboardingDashboardLink}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">
+                            View Onboarding Details
+                        </a>
+                    </div>
+                    
+                    <p>Please log in to the HR Portal to review the submission.</p>
+                    <br>
+                    <p>Best regards,</p>
+                    <p><strong>Sunningdale Tech System</strong></p>
+                </div>
+            `
+        };
+
+        await transporter.sendMail(mailOptions);
+        console.log(`Onboarding notification sent to ${notificationEmail}`);
+
+        res.json({ success: true, message: 'Notification sent' });
+
+    } catch (error) {
+        console.error('Error sending onboarding notification:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // --- AD Integration Endpoints ---
 
 // Get pending users for AD provisioning
@@ -1749,8 +2184,10 @@ app.post('/api/schedule-interview', async (req, res) => {
             const newSlots = proposedSlots.map(slot => ({
                 start_time: slot.startTime,
                 end_time: slot.endTime,
-                status: 'open', // Set to 'open' so it's visible to candidate
-                application_id: applicationId
+                status: 'open',
+                application_id: applicationId,
+                meeting_type: slot.type || 'online', // 'online' or 'onsite'
+                room_details: slot.room || null // { id, name, email }
             }));
 
             const { error: slotsError } = await supabase
@@ -2046,123 +2483,299 @@ app.post('/api/book-interview', async (req, res) => {
     try {
         const { slotId, applicationId } = req.body;
 
-        // 1. Get Slots
-        const slots = await getAvailability();
-        const slotIndex = slots.findIndex(s => s.id === slotId);
-
-        if (slotIndex === -1) {
-            return res.status(404).json({ error: 'Slot not found' });
+        if (!slotId || !applicationId) {
+            return res.status(400).json({ error: 'Missing required fields' });
         }
 
-        const slot = slots[slotIndex];
+        // 1. Get Slot from Supabase
+        const { data: slot, error: slotError } = await supabase
+            .from('interview_slots')
+            .select('*')
+            .eq('id', slotId)
+            .single();
 
-        // Allow booking if status is 'open' OR if status is 'proposed' and matches the applicationId
-        const isProposedForThisApp = slot.status === 'proposed' && slot.applicationId === applicationId;
-
-        if (slot.status !== 'open' && !isProposedForThisApp) {
-            return res.status(409).json({ error: 'Slot already booked or not available' });
+        if (slotError || !slot) {
+            return res.status(404).json({ error: 'Interview slot not found' });
         }
 
-        // 2. Get Application to get Name/Email
-        const appKey = `applications/${applicationId}.json`;
-        const appCommand = new GetObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME,
-            Key: appKey
-        });
-        const appResponse = await s3Client.send(appCommand);
-        const appData = JSON.parse(await appResponse.Body.transformToString());
+        if (slot.status !== 'open' && slot.application_id !== applicationId) {
+            return res.status(409).json({ error: 'Slot is no longer available' });
+        }
 
-        // 3. Update Slot
-        slots[slotIndex].status = 'booked';
-        slots[slotIndex].bookedBy = {
-            applicationId,
-            name: appData.name,
-            email: appData.email
-        };
-        await saveAvailability(slots);
+        // 2. Get Application from Supabase
+        const { data: appData, error: appError } = await supabase
+            .from('applications')
+            .select('*')
+            .eq('id', applicationId)
+            .single();
+
+        if (appError || !appData) {
+            return res.status(404).json({ error: 'Application not found' });
+        }
+
+        // 3. Update Slot in Supabase
+        const { error: updateError } = await supabase
+            .from('interview_slots')
+            .update({
+                status: 'booked',
+                booked_by: {
+                    name: appData.name,
+                    email: appData.email,
+                    applicationId: applicationId
+                },
+                application_id: applicationId
+            })
+            .eq('id', slotId);
+
+        if (updateError) throw updateError;
 
         // 4. Update Application Status
-        appData.status = 'interview_scheduled';
-        appData.interviewSlotId = slotId;
-        appData.interviewTime = slots[slotIndex].startTime;
+        await supabase
+            .from('applications')
+            .update({ status: 'interview_scheduled' })
+            .eq('id', applicationId);
+        console.log('[DEBUG-FLOW] Application status updated.');
 
-        await s3Client.send(new PutObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME,
-            Key: appKey,
-            Body: JSON.stringify(appData, null, 2),
-            ContentType: 'application/json'
-        }));
+        // 5. Fetch Job Details for Hiring Manager Email (Source: Supabase)
+        console.log('[DEBUG-FLOW] Fetching job details from Supabase for:', appData.job_title);
 
-        // 5. Send Confirmation Emails (Admin & Candidate)
-        const interviewDate = new Date(slots[slotIndex].startTime);
-        const interviewEnd = new Date(slots[slotIndex].endTime);
-        const dateString = interviewDate.toLocaleString();
+        const { data: jobData, error: jobError } = await supabase
+            .from('jobs')
+            .select('*')
+            .ilike('title', appData.job_title) // Case-insensitive match
+            .maybeSingle(); // Use maybeSingle to avoid 406 if multiple (though should be unique) or 0 found
 
-        // Fetch Job Details to get Hiring Manager Email
-        const jobs = await getJobsFromS3();
-        const job = jobs.find(j => j.title === appData.jobTitle);
-        const hiringManagerEmail = job?.hiringManagerEmail;
-        const notificationEmail = job?.email || process.env.CONTACT_EMAIL;
+        if (jobError) {
+            console.error('[DEBUG-FLOW] Error fetching job from Supabase:', jobError);
+        }
+
+        const job = jobData;
+        console.log('[DEBUG-FLOW] Job found in Supabase:', job ? 'Yes' : 'No');
+
+        if (job) {
+            console.log('[DEBUG-FLOW] Job Emails - HiringManager:', job.hiring_manager_email, 'Notification:', job.email);
+        }
+
+        // Map Supabase snake_case to local variables
+        const hiringManagerEmail = job?.hiring_manager_email;
+        const notificationEmail = job?.email || process.env.SMTP_USER || 'stl-workflow@sdaletech.com';
+
+        // 6. Send Confirmation Emails
+        console.log('[DEBUG-FLOW] Preparing email...');
+        const interviewDate = new Date(slot.start_time);
+        const interviewEnd = new Date(slot.end_time);
+        const dateString = interviewDate.toLocaleString('en-SG', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+
+        // --- TEAMS MEETING GENERATION ---
+        let meetingLink = null;
+        let locationText = "Microsoft Teams Meeting"; // Default/Fallback
+
+        // Fix: Define isOnsite from slot data
+        const isOnsite = slot.meeting_type === 'onsite';
+        if (isOnsite && slot.room_details) {
+            locationText = `${slot.room_details.name} (${slot.room_details.address?.buildingStr || 'Onsite'})`;
+        }
+
+        // Try to generate a dynamic link only if ONLINE default
+        // Actually, if isOnsite, we don't need Teams link usually?
+        // But user code structure implies we create it anyway or use logic.
+        // Let's keep existing logic but SKIP createTeamsMeeting if isOnsite to save time/error?
+        // The original code tried to create it regardless. 
+        // Let's strictly follow the "isOnsite" flag to optimize.
+
+        let teamsMeeting = null;
+        if (!isOnsite) {
+            teamsMeeting = await createTeamsMeeting(
+                `Interview: ${appData.name} - ${appData.job_title}`,
+                interviewDate.toISOString(),
+                interviewEnd.toISOString()
+            );
+        }
+
+        if (teamsMeeting && teamsMeeting.joinUrl) {
+            meetingLink = teamsMeeting.joinUrl;
+            locationText = meetingLink; // For ICS location, sometimes URL is better or just "Microsoft Teams Meeting"
+        }
+
+        const teamsLinkHtml = meetingLink
+            ? `<p><strong>Join Teams Meeting:</strong> <a href="${meetingLink}">Click here to join</a></p>`
+            : `<p><strong>Location:</strong> Microsoft Teams Meeting (Link will be provided separately if not attached)</p>`;
+
+        const teamsLinkTxt = meetingLink
+            ? `Join Teams Meeting: ${meetingLink}`
+            : `Location: Microsoft Teams Meeting`;
+
 
         // Create ICS Content
-        const icsContent = `BEGIN:VCALENDAR
-VERSION:2.0
-PRODID:-//Sunningdale Tech//Interview System//EN
-CALSCALE:GREGORIAN
-METHOD:REQUEST
-BEGIN:VEVENT
-UID:${slotId}@sunningdale.com
-DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').split('.')[0]}Z
-DTSTART:${interviewDate.toISOString().replace(/[-:]/g, '').split('.')[0]}Z
-DTEND:${interviewEnd.toISOString().replace(/[-:]/g, '').split('.')[0]}Z
-SUMMARY:Interview: ${appData.name} - ${appData.jobTitle}
-DESCRIPTION:Interview with ${appData.name} for the position of ${appData.jobTitle}.
-LOCATION:Online / Sunningdale Tech
-ORGANIZER;CN=Sunningdale HR:mailto:${notificationEmail}
-ATTENDEE;RSVP=TRUE;CN=${appData.name}:mailto:${appData.email}
-${hiringManagerEmail ? `ATTENDEE;RSVP=TRUE;CN=Hiring Manager:mailto:${hiringManagerEmail}` : ''}
-STATUS:CONFIRMED
-SEQUENCE:0
-END:VEVENT
-END:VCALENDAR`;
+        // If we have a link, put it in DESCRIPTION and possibly LOCATION
+        const icsDescription = `Interview with ${appData.name} for the position of ${appData.job_title}.\\n\\n${teamsLinkTxt}`;
+        // Fix: Use locationText for onsite meetings instead of defaulting to Teams
+        const icsLocation = isOnsite ? locationText : (meetingLink || "Microsoft Teams Meeting");
 
-        // Email Recipients
+        // Create ICS Content
+        // Ensure strictly CRLF line endings for Outlook compatibility
+        const icsLines = [
+            'BEGIN:VCALENDAR',
+            'VERSION:2.0',
+            'PRODID:-//Sunningdale Tech//Interview System//EN',
+            'CALSCALE:GREGORIAN',
+            'METHOD:REQUEST', // Critical for "Invite" behavior
+            'BEGIN:VEVENT',
+            `UID:${slotId}@sdaletech.com`,
+            `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').split('.')[0]}Z`,
+            `DTSTART:${interviewDate.toISOString().replace(/[-:]/g, '').split('.')[0]}Z`,
+            `DTEND:${interviewEnd.toISOString().replace(/[-:]/g, '').split('.')[0]}Z`,
+            `SUMMARY:Interview: ${appData.name} - ${appData.job_title}`,
+            `DESCRIPTION:${icsDescription}`,
+            `LOCATION:${icsLocation}`,
+            `ORGANIZER;CN=Sunningdale HR:mailto:${process.env.SMTP_USER || notificationEmail}`,
+            `ATTENDEE;RSVP=TRUE;CN=${appData.name}:mailto:${appData.email}`
+        ];
+
+        if (hiringManagerEmail) {
+            icsLines.push(`ATTENDEE;RSVP=TRUE;CN=Hiring Manager:mailto:${hiringManagerEmail}`);
+        }
+
+        // Add Notification Email (e.g. Saharudin) to attendees if not same as Hiring Manager
+        if (notificationEmail && notificationEmail !== hiringManagerEmail && notificationEmail !== process.env.SMTP_USER) {
+            icsLines.push(`ATTENDEE;RSVP=TRUE;CN=Notification Contact:mailto:${notificationEmail}`);
+        }
+
+        // Add Room Email if Onsite (to book the room)
+        const roomEmail = slot.room_details?.email;
+        if (isOnsite && roomEmail) {
+            icsLines.push(`ATTENDEE;RSVP=TRUE;CN=Meeting Room:mailto:${roomEmail}`);
+            // Also add CUTYPE=RESOURCE if needed, but standard attendee usually books it
+        }
+
+        icsLines.push('STATUS:CONFIRMED');
+        icsLines.push('SEQUENCE:0');
+        icsLines.push('END:VEVENT');
+        icsLines.push('END:VCALENDAR');
+
+        const icsContent = icsLines.join('\r\n');
+
         const recipients = [appData.email, notificationEmail];
         if (hiringManagerEmail) {
             recipients.push(hiringManagerEmail);
         }
+        // Add Room Email to recipients to ensure it gets the invite
+        if (isOnsite && roomEmail) {
+            recipients.push(roomEmail);
+        }
 
-        // Email to All Parties
-        const mailOptions = {
-            from: process.env.SMTP_USER,
-            to: recipients.join(', '),
-            subject: `Interview Confirmed: ${appData.name} - ${appData.jobTitle}`,
-            text: `
-                Interview Confirmed
-                
-                Candidate: ${appData.name}
-                Position: ${appData.jobTitle}
-                Time: ${dateString}
-                
-                A calendar invitation is attached.
-            `,
-            html: `
-                <h3>Interview Confirmed</h3>
-                <p><strong>Candidate:</strong> ${appData.name}</p>
-                <p><strong>Position:</strong> ${appData.jobTitle}</p>
-                <p><strong>Time:</strong> ${dateString}</p>
-                <br/>
-                <p>Please find the calendar invitation attached.</p>
-            `,
-            icalEvent: {
-                filename: 'interview.ics',
-                method: 'request',
-                content: icsContent
+        // Filter and Deduplicate
+        // Use a Map to deduplicate by lowercase email to handle case-sensitivity issues
+        const uniqueRecipientsMap = new Map();
+        recipients.forEach(r => {
+            if (r && r.trim().length > 0) {
+                uniqueRecipientsMap.set(r.toLowerCase(), r);
             }
-        };
+        });
+        const validRecipients = Array.from(uniqueRecipientsMap.values());
 
-        await transporter.sendMail(mailOptions);
-        console.log(`[Interview] Confirmation email sent to: ${recipients.join(', ')}`);
+        if (validRecipients.length === 0) {
+            console.warn('[Interview] No valid email recipients found.');
+        } else {
+            console.log('[DEBUG-FLOW] Sending single email to multiple recipients via transporter...');
+
+            // Helper to sanitize email
+            const cleanEmail = (email) => {
+                return email ? email.trim().replace(/[\u200B-\u200D\uFEFF]/g, '') : '';
+            };
+
+            const sanitizedRecipients = validRecipients.map(cleanEmail).filter(e => e.length > 0);
+            const toField = sanitizedRecipients.join(', ');
+
+            console.log('[DEBUG-FLOW] Final To Header:', toField);
+
+            // HARDCODED TEST - SINGLE RECIPIENT ONLY
+            // const testRecipients = 'linkang.sun@sdaletech.com';
+            // console.log('[DEBUG-FLOW] !!! USING SINGLE RECIPIENT !!! :', testRecipients);
+
+            const mailOptions = {
+                from: process.env.SMTP_USER,
+                to: toField, // Use dynamic recipients
+                subject: `Interview Confirmed: ${appData.name} - ${appData.job_title}`,
+                text: `
+Interview Confirmed
+
+Candidate: ${appData.name}
+Position: ${appData.job_title}
+Time: ${dateString}
+${teamsLinkTxt}
+
+A calendar invitation is attached to this email.
+                `,
+                html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 10px; overflow: hidden;">
+                        <div style="background-color: #2563eb; color: white; padding: 20px; text-align: center;">
+                            <h2 style="margin: 0;">Interview Confirmed</h2>
+                        </div>
+                        <div style="padding: 30px; color: #333;">
+                            <p>The interview has been successfully scheduled.</p>
+                            <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+                                <tr>
+                                    <td style="padding: 10px 0; border-bottom: 1px solid #eee; font-weight: bold; width: 30%;">Candidate</td>
+                                    <td style="padding: 10px 0; border-bottom: 1px solid #eee;">${appData.name}</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 10px 0; border-bottom: 1px solid #eee; font-weight: bold;">Position</td>
+                                    <td style="padding: 10px 0; border-bottom: 1px solid #eee;">${appData.job_title}</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 10px 0; border-bottom: 1px solid #eee; font-weight: bold;">Time</td>
+                                    <td style="padding: 10px 0; border-bottom: 1px solid #eee;">${dateString}</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 10px 0; border-bottom: 1px solid #eee; font-weight: bold;">Location</td>
+                                    <td style="padding: 10px 0; border-bottom: 1px solid #eee;">
+                                        ${isOnsite ? locationText : (meetingLink ? `<a href="${meetingLink}">Join Teams Meeting</a>` : 'Microsoft Teams Meeting')}
+                                    </td>
+                                </tr>
+                            </table>
+                            ${meetingLink ? `
+                            <div style="margin: 30px 0; text-align: center;">
+                                <a href="${meetingLink}" style="background-color: #5b5fc7; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">
+                                    Join Teams Meeting
+                                </a>
+                            </div>
+                            ` : ''}
+                            <p style="color: #666; font-size: 14px; margin-top: 30px;">
+                                A calendar invitation has been attached to this email. Please accept it to add this to your calendar.
+                            </p>
+                        </div>
+                        <div style="background-color: #f9fafb; padding: 20px; text-align: center; color: #999; font-size: 12px;">
+                            © Sunningdale Tech Ltd
+                        </div>
+                    </div>
+                `,
+                icalEvent: {
+                    filename: 'interview.ics',
+                    method: 'request',
+                    content: icsContent
+                }
+            };
+
+            console.log('[DEBUG-EMAIL] icalEvent ENABLED');
+            console.log('[DEBUG-EMAIL] mailOptions.to:', mailOptions.to);
+
+            try {
+                // Using exact same method as schedule-interview endpoint
+                await transporter.sendMail(mailOptions);
+                console.log(`[Interview] Confirmation email sent to ${toField}`);
+            } catch (emailError) {
+                console.error('[Interview] Failed to send email:', emailError.message);
+                // We do NOT throw here, so the client still gets a success response for the booking
+            }
+        }
 
         res.json({ message: 'Interview booked successfully' });
 
@@ -2173,12 +2786,15 @@ END:VCALENDAR`;
 });
 
 // Serve static files from the 'dist' directory
-app.use(express.static(path.join(__dirname, 'dist')));
+// Serve static files from the 'dist' directory ONLY in production
+if (process.env.NODE_ENV === 'production') {
+    app.use(express.static(path.join(__dirname, 'dist')));
 
-// Handle React routing, return all requests to React app
-app.get(/.*/, (req, res) => {
-    res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-});
+    // Handle React routing, return all requests to React app
+    app.get(/.*/, (req, res) => {
+        res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+    });
+}
 
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);

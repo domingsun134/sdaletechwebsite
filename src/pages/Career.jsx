@@ -50,7 +50,7 @@ const Career = () => {
                         </Link>
 
                         {/* Internships */}
-                        <a href="https://www.sdaletech.com/internships" target="_blank" rel="noopener noreferrer" className="group block h-full">
+                        <Link to="/careers/internships" className="group block h-full">
                             <div className="bg-white p-8 rounded-xl shadow-sm border border-slate-100 h-full hover:shadow-md transition-shadow flex flex-col items-center text-center">
                                 <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mb-6 group-hover:bg-blue-100 transition-colors">
                                     <GraduationCap className="w-8 h-8 text-primary" />
@@ -63,10 +63,10 @@ const Career = () => {
                                     Learn More <ArrowRight size={16} />
                                 </span>
                             </div>
-                        </a>
+                        </Link>
 
                         {/* Talent Community */}
-                        <a href="https://www.sdaletech.com/talent-community" target="_blank" rel="noopener noreferrer" className="group block h-full">
+                        <Link to="/careers/talent-community" className="group block h-full">
                             <div className="bg-white p-8 rounded-xl shadow-sm border border-slate-100 h-full hover:shadow-md transition-shadow flex flex-col items-center text-center">
                                 <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mb-6 group-hover:bg-blue-100 transition-colors">
                                     <Users className="w-8 h-8 text-primary" />
@@ -79,7 +79,7 @@ const Career = () => {
                                     Join Now <ArrowRight size={16} />
                                 </span>
                             </div>
-                        </a>
+                        </Link>
                     </div>
                 </div>
             </div>

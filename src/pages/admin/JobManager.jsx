@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import AdminLayout from '../../components/admin/AdminLayout';
 import { useJobs } from '../../context/JobContext';
 import { useAuth } from '../../context/AuthContext';
@@ -49,6 +50,17 @@ const JobManager = () => {
         candidateName: '',
         applicationId: null
     });
+
+    const location = useLocation();
+
+    // Parse tab from URL on mount/update
+    useEffect(() => {
+        const params = new URLSearchParams(location.search);
+        const tab = params.get('tab');
+        if (tab) {
+            setActiveTab(tab);
+        }
+    }, [location.search]);
 
     useEffect(() => {
         const fetchApplications = async () => {
@@ -569,10 +581,14 @@ const JobManager = () => {
         });
     };
 
-    // 1. Get jobs owned by user (ignoring search term for now, used for filtering other data)
-    const ownedJobs = jobs.filter(job => !job.createdBy || job.createdBy === user?.username);
+    // 1. Get jobs owned by user (Admins see all)
+    const ownedJobs = jobs.filter(job =>
+        user?.role === 'admin' ||
+        !job.createdBy ||
+        job.createdBy === user?.username
+    );
 
-    // 2. Filter applications based on owned jobs
+    // 2. Filter applications based on visible jobs
     const ownedApplications = applications.filter(app =>
         ownedJobs.some(job => job.title === app.jobTitle)
     );

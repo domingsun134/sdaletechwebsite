@@ -26,7 +26,9 @@ const UpcomingInterviews = ({ jobs = [], applications = [] }) => {
                 startTime: slot.start_time,
                 endTime: slot.end_time,
                 bookedBy: slot.booked_by,
-                applicationId: slot.application_id
+                applicationId: slot.application_id,
+                meetingType: slot.meeting_type,
+                roomDetails: slot.room_details
             }));
 
             // Filter for future booked slots that belong to owned applications
@@ -138,8 +140,17 @@ const UpcomingInterviews = ({ jobs = [], applications = [] }) => {
                                         </div>
                                     )}
                                     <div className="flex items-center gap-2 text-sm text-slate-500 mt-2">
-                                        <Clock size={14} />
                                         {formatTime(interview.startTime)} - {formatTime(interview.endTime)}
+                                    </div>
+                                    <div className="flex items-center gap-2 mt-1">
+                                        <span className={`px-2 py-0.5 rounded text-xs font-medium border ${interview.meetingType === 'onsite' ? 'bg-purple-50 text-purple-700 border-purple-100' : 'bg-blue-50 text-blue-700 border-blue-100'}`}>
+                                            {interview.meetingType === 'onsite' ? 'Onsite' : 'Online'}
+                                        </span>
+                                        {interview.meetingType === 'onsite' && interview.roomDetails && (
+                                            <span className="text-xs text-slate-500">
+                                                {interview.roomDetails.name}
+                                            </span>
+                                        )}
                                     </div>
                                 </div>
                             </div>

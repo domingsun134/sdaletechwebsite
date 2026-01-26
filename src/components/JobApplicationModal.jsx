@@ -66,7 +66,7 @@ const JobApplicationModal = ({ isOpen, onClose, jobTitle, jobEmail }) => {
 
             // Trigger Auto-Analysis (Fire and Forget)
             if (appData && appData[0]) {
-                fetch(`http://localhost:3000/api/analyze-supabase-application/${appData[0].id}`, {
+                fetch(`/api/analyze-supabase-application/${appData[0].id}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' }
                 }).catch(err => console.error('Error triggering analysis:', err));

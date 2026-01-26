@@ -7,6 +7,13 @@ const UserManager = () => {
     const { users, addUser, deleteUser, rolePermissions, updateRolePermissions } = useAuth();
     const [activeTab, setActiveTab] = useState('users'); // 'users' or 'roles'
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [modalTab, setModalTab] = useState('local'); // 'local' or 'entra'
+
+    // Entra ID Search State
+    const [entraSearchQuery, setEntraSearchQuery] = useState('');
+    const [entraResults, setEntraResults] = useState([]);
+    const [isLoadingEntra, setIsLoadingEntra] = useState(false);
+
     const [formData, setFormData] = useState({
         username: '',
         password: '',
@@ -31,6 +38,48 @@ const UserManager = () => {
         addUser(formData);
         setIsModalOpen(false);
         setFormData({ username: '', password: '', name: '', role: 'hr' });
+    };
+
+    const handleEntraSearch = async (e) => {
+        e.preventDefault();
+        if (!entraSearchQuery.trim()) return;
+
+        setIsLoadingEntra(true);
+        try {
+            const response = await fetch('/api/entra-users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ search: entraSearchQuery })
+            });
+            const data = await response.json();
+            setEntraResults(Array.isArray(data) ? data : []);
+        } catch (error) {
+            console.error('Failed to search Entra users:', error);
+            setEntraResults([]);
+        } finally {
+            setIsLoadingEntra(false);
+        }
+    };
+
+    const handleAddEntraUser = (entraUser) => {
+        // Create user object from Entra data
+        const newUser = {
+            username: entraUser.mail || entraUser.userPrincipalName, // Use email as username
+            name: entraUser.displayName,
+            role: formData.role, // Use the role selected in the form state (even if hidden in this tab, we should expose it)
+            email: entraUser.mail,
+            azure_oid: entraUser.id,
+            company_name: entraUser.companyName
+        };
+
+        try {
+            addUser(newUser);
+            setIsModalOpen(false);
+            setEntraResults([]);
+            setEntraSearchQuery('');
+        } catch (error) {
+            alert('Failed to add user: ' + error.message);
+        }
     };
 
     const handleDelete = (id) => {
@@ -200,65 +249,145 @@ const UserManager = () => {
                                     <X size={24} />
                                 </button>
                             </div>
-                            <form onSubmit={handleSubmit} className="p-6 space-y-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Full Name</label>
-                                    <input
-                                        type="text"
-                                        required
-                                        className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none"
-                                        value={formData.name}
-                                        onChange={e => setFormData({ ...formData, name: e.target.value })}
-                                    />
+                            <div className="border-b border-slate-100 flex">
+                                <button
+                                    className={`flex-1 py-3 text-sm font-medium transition-colors ${modalTab === 'local' ? 'text-primary border-b-2 border-primary' : 'text-slate-500 hover:text-slate-700'}`}
+                                    onClick={() => setModalTab('local')}
+                                >
+                                    Local User
+                                </button>
+                                <button
+                                    className={`flex-1 py-3 text-sm font-medium transition-colors ${modalTab === 'entra' ? 'text-primary border-b-2 border-primary' : 'text-slate-500 hover:text-slate-700'}`}
+                                    onClick={() => setModalTab('entra')}
+                                >
+                                    Azure Entra ID
+                                </button>
+                            </div>
+
+                            {modalTab === 'local' ? (
+                                <form onSubmit={handleSubmit} className="p-6 space-y-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Full Name</label>
+                                        <input
+                                            type="text"
+                                            required
+                                            className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none"
+                                            value={formData.name}
+                                            onChange={e => setFormData({ ...formData, name: e.target.value })}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Username</label>
+                                        <input
+                                            type="text"
+                                            required
+                                            className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none"
+                                            value={formData.username}
+                                            onChange={e => setFormData({ ...formData, username: e.target.value })}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
+                                        <input
+                                            type="password"
+                                            required
+                                            className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none"
+                                            value={formData.password}
+                                            onChange={e => setFormData({ ...formData, password: e.target.value })}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Role</label>
+                                        <select
+                                            className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none bg-white"
+                                            value={formData.role}
+                                            onChange={e => setFormData({ ...formData, role: e.target.value })}
+                                        >
+                                            <option value="hr">HR Manager</option>
+                                            <option value="marketing">Marketing Director</option>
+                                            <option value="admin">Administrator</option>
+                                        </select>
+                                    </div>
+                                    <div className="pt-4 flex justify-end gap-3">
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsModalOpen(false)}
+                                            className="px-4 py-2 text-slate-600 hover:bg-slate-50 rounded-lg font-medium"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            type="submit"
+                                            className="px-4 py-2 bg-primary text-white rounded-lg font-medium hover:bg-primary-dark"
+                                        >
+                                            Create User
+                                        </button>
+                                    </div>
+                                </form>
+                            ) : (
+                                <div className="p-6 space-y-4">
+                                    <div className="space-y-2">
+                                        <label className="block text-sm font-medium text-slate-700">Role for New User</label>
+                                        <select
+                                            className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none bg-white"
+                                            value={formData.role}
+                                            onChange={e => setFormData({ ...formData, role: e.target.value })}
+                                        >
+                                            <option value="hr">HR Manager</option>
+                                            <option value="marketing">Marketing Director</option>
+                                            <option value="admin">Administrator</option>
+                                        </select>
+                                    </div>
+                                    <form onSubmit={handleEntraSearch} className="flex gap-2">
+                                        <input
+                                            type="text"
+                                            placeholder="Search by name..."
+                                            className="flex-1 px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none"
+                                            value={entraSearchQuery}
+                                            onChange={(e) => setEntraSearchQuery(e.target.value)}
+                                        />
+                                        <button
+                                            type="submit"
+                                            disabled={isLoadingEntra}
+                                            className="px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-700 disabled:opacity-50"
+                                        >
+                                            {isLoadingEntra ? '...' : 'Search'}
+                                        </button>
+                                    </form>
+
+                                    <div className="mt-4 max-h-60 overflow-y-auto space-y-2">
+                                        {entraResults.length > 0 ? (
+                                            entraResults.map((user) => (
+                                                <div key={user.id} className="flex items-center justify-between p-3 border border-slate-100 rounded-lg hover:bg-slate-50">
+                                                    <div>
+                                                        <div className="font-medium text-slate-900">{user.displayName}</div>
+                                                        <div className="text-sm text-slate-500">{user.mail || user.userPrincipalName}</div>
+                                                        <div className="text-xs text-slate-400">
+                                                            {user.jobTitle || 'No Title'}
+                                                            {user.companyName && (
+                                                                <span className="ml-2 pl-2 border-l border-slate-300">
+                                                                    {user.companyName}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    <button
+                                                        onClick={() => handleAddEntraUser(user)}
+                                                        className="text-primary hover:bg-primary/10 p-2 rounded-full transition-colors"
+                                                        title="Add User"
+                                                    >
+                                                        <Plus size={20} />
+                                                    </button>
+                                                </div>
+                                            ))
+                                        ) : (
+                                            <div className="text-center text-slate-400 py-4">
+                                                {isLoadingEntra ? 'Searching...' : 'Search for users in Entra ID'}
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Username</label>
-                                    <input
-                                        type="text"
-                                        required
-                                        className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none"
-                                        value={formData.username}
-                                        onChange={e => setFormData({ ...formData, username: e.target.value })}
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
-                                    <input
-                                        type="password"
-                                        required
-                                        className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none"
-                                        value={formData.password}
-                                        onChange={e => setFormData({ ...formData, password: e.target.value })}
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Role</label>
-                                    <select
-                                        className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none bg-white"
-                                        value={formData.role}
-                                        onChange={e => setFormData({ ...formData, role: e.target.value })}
-                                    >
-                                        <option value="hr">HR Manager</option>
-                                        <option value="marketing">Marketing Director</option>
-                                        <option value="admin">Administrator</option>
-                                    </select>
-                                </div>
-                                <div className="pt-4 flex justify-end gap-3">
-                                    <button
-                                        type="button"
-                                        onClick={() => setIsModalOpen(false)}
-                                        className="px-4 py-2 text-slate-600 hover:bg-slate-50 rounded-lg font-medium"
-                                    >
-                                        Cancel
-                                    </button>
-                                    <button
-                                        type="submit"
-                                        className="px-4 py-2 bg-primary text-white rounded-lg font-medium hover:bg-primary-dark"
-                                    >
-                                        Create User
-                                    </button>
-                                </div>
-                            </form>
+                            )}
                         </div>
                     </div>
                 )}

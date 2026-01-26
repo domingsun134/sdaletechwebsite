@@ -62,31 +62,19 @@ const InterviewBooking = () => {
         setStep('confirming');
 
         try {
-            // 1. Fetch Application details to get name/email
-            const { data: appData, error: appError } = await supabase
-                .from('applications')
-                .select('name, email')
-                .eq('id', applicationId)
-                .single();
-
-            if (appError) throw new Error('Could not find application details');
-
-            // 2. Update slot
-            const { error } = await supabase
-                .from('interview_slots')
-                .update({
-                    status: 'booked',
-                    booked_by: {
-                        name: appData.name,
-                        email: appData.email,
-                        applicationId: applicationId
-                    },
-                    application_id: applicationId
+            const response = await fetch('/api/book-interview', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    slotId: selectedSlot.id,
+                    applicationId: applicationId
                 })
-                .eq('id', selectedSlot.id)
-                .eq('status', 'open'); // Ensure it's still open
+            });
 
-            if (error) throw error;
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Failed to book interview');
+            }
 
             setStep('success');
         } catch (error) {

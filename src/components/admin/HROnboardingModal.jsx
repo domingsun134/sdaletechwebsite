@@ -70,7 +70,7 @@ const HROnboardingModal = ({ isOpen, onClose, candidate, onSuccess }) => {
         if (!query) return;
         setIsSearchingManager(true);
         try {
-            const response = await fetch('http://localhost:3000/api/entra-users', {
+            const response = await fetch('/api/entra-users', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ search: query })

@@ -251,8 +251,20 @@ const AvailabilityManager = ({ applications = [] }) => {
                                         <div className="flex items-center gap-3 px-4 py-2 bg-green-50 text-green-700 rounded-lg border border-green-100">
                                             <CheckCircle size={18} />
                                             <div>
-                                                <div className="font-medium text-sm">Booked by {slot.bookedBy?.name}</div>
-                                                <div className="text-xs opacity-80">{slot.bookedBy?.email}</div>
+                                                {(() => {
+                                                    const bookedApp = applications.find(app => app.id === (slot.bookedBy?.applicationId || slot.applicationId));
+                                                    return bookedApp ? (
+                                                        <>
+                                                            <div className="font-medium text-sm">{bookedApp.name}</div>
+                                                            <div className="text-xs opacity-80">{bookedApp.job_title}</div>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <div className="font-medium text-sm">Booked by {slot.bookedBy?.name || 'Unknown'}</div>
+                                                            <div className="text-xs opacity-80">{slot.bookedBy?.email || 'N/A'}</div>
+                                                        </>
+                                                    );
+                                                })()}
                                             </div>
                                         </div>
                                     ) : (
