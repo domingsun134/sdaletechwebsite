@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../context/AuthContext';
 import { Calendar, Clock, Plus, Trash2, User, CheckCircle } from 'lucide-react';
 import StatusModal from './StatusModal';
 
 const AvailabilityManager = ({ applications = [] }) => {
+    const { user } = useAuth();
     const [slots, setSlots] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
     const [newSlot, setNewSlot] = useState({
@@ -21,15 +23,21 @@ const AvailabilityManager = ({ applications = [] }) => {
     });
 
     useEffect(() => {
-        fetchSlots();
-    }, [applications]); // Re-run if applications change
+        if (user) {
+            fetchSlots();
+        }
+    }, [applications, user]); // Re-run if applications or user changes
 
     const fetchSlots = async () => {
         setIsLoading(true);
         try {
+            // Fetch slots with application details (candidate name and job title)
             const { data, error } = await supabase
                 .from('interview_slots')
-                .select('*')
+                .select(`
+                    *,
+                    application:applications(id, name, email, job_title)
+                `)
                 .order('start_time', { ascending: true });
 
             if (data) {
@@ -39,7 +47,11 @@ const AvailabilityManager = ({ applications = [] }) => {
                     startTime: slot.start_time,
                     endTime: slot.end_time,
                     bookedBy: slot.booked_by,
-                    applicationId: slot.application_id
+                    applicationId: slot.application_id,
+                    candidateName: slot.application?.name || null,
+                    candidateEmail: slot.application?.email || null,
+                    jobTitle: slot.application?.job_title || null,
+                    companyName: slot.company_name
                 }));
 
                 // Filter slots based on ownership AND date (today onwards)
@@ -50,9 +62,22 @@ const AvailabilityManager = ({ applications = [] }) => {
                     // Filter out past slots
                     if (new Date(slot.startTime) < today) return false;
 
-                    if (slot.status === 'open') return true;
+                    // Visibility Logic
+                    if (slot.status === 'open') {
+                        // Super/Site Admin (Admin) sees all? Or just Super Admin?
+                        // Usually Super Admin sees everything.
+                        if (user?.role === 'super_admin' || user?.role === 'admin') return true;
 
-                    // Check if linked application is in our owned list
+                        // Site Admin / HR User: Only see slots for their company
+                        // If slot has no company (legacy), maybe show it? Or hide it? 
+                        // Let's hide checks against strict company mismatch.
+                        // If user has no company, they might see everything or nothing.
+                        if (!user?.company_name) return true; // Fallback
+                        return slot.companyName === user.company_name;
+                    }
+
+                    // For 'booked' slots:
+                    // Check if linked application is in our owned list (which is already filtered by JobManager)
                     const appId = slot.bookedBy?.applicationId || slot.applicationId;
                     return applications.some(app => app.id === appId);
                 });
@@ -73,13 +98,18 @@ const AvailabilityManager = ({ applications = [] }) => {
         const startDateTime = new Date(`${newSlot.date}T${newSlot.startTime}`);
         const endDateTime = new Date(`${newSlot.date}T${newSlot.endTime}`);
 
+        // Default Company: User's company or HQ
+        const companyToSave = user?.company_name || 'Sunningdale Tech Ltd (HQ)';
+
         try {
             const { data, error } = await supabase
                 .from('interview_slots')
                 .insert([{
                     start_time: startDateTime.toISOString(),
                     end_time: endDateTime.toISOString(),
-                    status: 'open'
+                    status: 'open',
+                    created_by: user?.username || 'system',
+                    company_name: companyToSave
                 }])
                 .select()
                 .single();
@@ -93,7 +123,8 @@ const AvailabilityManager = ({ applications = [] }) => {
                     startTime: data.start_time,
                     endTime: data.end_time,
                     bookedBy: data.booked_by,
-                    applicationId: data.application_id
+                    applicationId: data.application_id,
+                    companyName: data.company_name
                 };
 
                 setSlots(prev => [...prev, addedSlot].sort((a, b) => new Date(a.startTime) - new Date(b.startTime)));
@@ -267,9 +298,17 @@ const AvailabilityManager = ({ applications = [] }) => {
                                                 })()}
                                             </div>
                                         </div>
+                                    ) : slot.candidateName ? (
+                                        <div className="flex items-center gap-3 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg border border-blue-100">
+                                            <User size={18} />
+                                            <div>
+                                                <div className="font-medium text-sm">{slot.candidateName}</div>
+                                                <div className="text-xs opacity-80">{slot.jobTitle || 'N/A'}</div>
+                                            </div>
+                                        </div>
                                     ) : (
                                         <span className="px-3 py-1 bg-slate-100 text-slate-600 text-sm font-medium rounded-full">
-                                            Available
+                                            Available (Public)
                                         </span>
                                     )}
                                 </div>

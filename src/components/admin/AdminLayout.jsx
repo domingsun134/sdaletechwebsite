@@ -2,6 +2,7 @@ import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { Layout, Briefcase, LogOut, Menu, X, Users, FileEdit, BarChart2, Calendar } from 'lucide-react';
+import LanguageSwitcher from '../LanguageSwitcher';
 import logo from '../../assets/logo.png';
 
 const AdminLayout = ({ children }) => {
@@ -113,6 +114,26 @@ const AdminLayout = ({ children }) => {
                     </nav>
 
                     <div className="p-4 border-t border-slate-100">
+                        {/* Language Switcher */}
+                        <div className="mb-2">
+                            <LanguageSwitcher direction="up" />
+                        </div>
+
+                        {/* User Profile Info */}
+                        <div className="flex items-center gap-3 px-2 mb-3">
+                            <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 font-bold text-sm shrink-0">
+                                {user?.name?.charAt(0) || user?.username?.charAt(0) || 'U'}
+                            </div>
+                            <div className="overflow-hidden">
+                                <p className="text-sm font-bold text-slate-800 truncate" title={user?.name}>
+                                    {user?.name || user?.username}
+                                </p>
+                                <p className="text-xs text-slate-500 truncate" title={user?.company_name || 'Sunningdale Tech Ltd (HQ)'}>
+                                    {user?.company_name || 'Sunningdale Tech Ltd (HQ)'}
+                                </p>
+                            </div>
+                        </div>
+
                         <button
                             onClick={handleLogout}
                             className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-600 hover:bg-red-50 hover:text-red-600 transition-colors group"

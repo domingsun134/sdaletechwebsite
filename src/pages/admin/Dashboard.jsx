@@ -6,7 +6,7 @@ import { BarChart2, Shield } from 'lucide-react';
 
 const Dashboard = () => {
     const { user } = useAuth();
-    const canViewAnalytics = ['admin', 'marketing'].includes(user?.role);
+    const canViewAnalytics = ['super_admin', 'site_admin', 'admin', 'marketing'].includes(user?.role);
 
     return (
         <AdminLayout>

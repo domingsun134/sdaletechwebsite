@@ -3,7 +3,7 @@ import { X, Upload, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const JobApplicationModal = ({ isOpen, onClose, jobTitle, jobEmail }) => {
+const JobApplicationModal = ({ isOpen, onClose, jobTitle, jobEmail, jobId }) => {
     const [formData, setFormData] = useState({
         name: '',
         email: '',
@@ -52,11 +52,13 @@ const JobApplicationModal = ({ isOpen, onClose, jobTitle, jobEmail }) => {
             const { data: appData, error: insertError } = await supabase
                 .from('applications')
                 .insert([{
+                    job_id: jobId, // Save Job ID for linking
                     job_title: jobTitle,
                     name: formData.name,
                     email: formData.email,
                     phone: formData.phone,
                     resume_url: resumeUrl || null,
+                    resume_filename: formData.resume.name, // Save original filename
                     status: 'applied',
 
                 }])

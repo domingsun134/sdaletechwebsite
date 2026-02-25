@@ -101,7 +101,7 @@ const Login = () => {
                                 <path fill="#05a6f0" d="M1 11h9v9H1z" />
                                 <path fill="#ffba08" d="M11 11h9v9h-9z" />
                             </svg>
-                            Sign in with Microsoft
+                            Sign in with Microsoft Entra ID
                         </button>
                     </div>
                 </div>

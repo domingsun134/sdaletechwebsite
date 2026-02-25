@@ -164,7 +164,7 @@ app.post('/api/book-interview', async (req, res) => {
                     <p><strong>Candidate:</strong> ${appData.name}</p>
                     <p><strong>Position:</strong> ${appData.jobTitle}</p>
                     <p><strong>Time:</strong> ${interviewDate}</p>
-                    <p>View in <a href="http://localhost:5173/admin/jobs">Admin Portal</a></p>
+                    <p>View in <a href="https://www.sdaletech.com/admin/jobs">Admin Portal</a></p>
                 </div>
             `
         });

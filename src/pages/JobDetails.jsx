@@ -175,6 +175,7 @@ const JobDetails = () => {
                 isOpen={isApplicationModalOpen}
                 onClose={() => setIsApplicationModalOpen(false)}
                 jobTitle={job.title}
+                jobId={job.id} // Pass Job ID
                 jobEmail={job.email || 'hr@sdaletech.com'}
             />
         </div>

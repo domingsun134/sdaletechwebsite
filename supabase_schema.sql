@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS applications (
     phone TEXT,
     resume_url TEXT,
     status TEXT DEFAULT 'applied',
-    analysis JSONB
+    analysis JSONB,
+    archived_at TIMESTAMP WITH TIME ZONE
 );
 
 -- Create interview_slots table

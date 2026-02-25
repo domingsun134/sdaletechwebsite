@@ -4,6 +4,7 @@ import HeroSection from '../components/HeroSection';
 import { Target, Lightbulb, Users, Award, ShieldCheck, Zap, TrendingUp, Heart } from 'lucide-react';
 import valuesBg from '../assets/values-section.jpg';
 import visionHeroImg from '../assets/vision-hero.jpg';
+import heroBg from '../assets/hero-bg.png';
 
 const OurVision = () => {
     const values = [
@@ -32,7 +33,7 @@ const OurVision = () => {
         <div className="flex flex-col">
             <HeroSection
                 title="A one-stop precision plastic engineering company"
-                backgroundImage="https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&q=80&w=2069"
+                backgroundImage={heroBg}
             />
 
             {/* Intro Section */}

@@ -83,7 +83,7 @@ const Home = () => {
                         <p className="text-xl text-slate-600 leading-relaxed mb-10 font-light">
                             {about.description}
                         </p>
-                        <Link to="/about" className="btn btn-primary">
+                        <Link to="/about/vision" className="btn btn-primary">
                             Discover More
                         </Link>
                     </motion.div>

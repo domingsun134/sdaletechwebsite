@@ -3,7 +3,8 @@ import { useLocation } from 'react-router-dom';
 import AdminLayout from '../../components/admin/AdminLayout';
 import { useJobs } from '../../context/JobContext';
 import { useAuth } from '../../context/AuthContext';
-import { Plus, Edit, Trash2, Save, X, Search, MapPin, Briefcase, Users, Building2, Mail, Calendar, CheckCircle, ClipboardCheck, UserPlus, RefreshCw, Download, CloudUpload } from 'lucide-react';
+import { useLanguage } from '../../context/LanguageContext';
+import { Plus, Edit, Trash2, Save, X, Search, MapPin, Briefcase, Users, Building2, Mail, Calendar, CheckCircle, ClipboardCheck, UserPlus, RefreshCw, Download, CloudUpload, Copy, Archive } from 'lucide-react';
 import ResumeAnalysisModal from '../../components/admin/ResumeAnalysisModal';
 import StatusModal from '../../components/admin/StatusModal';
 import AvailabilityManager from '../../components/admin/AvailabilityManager';
@@ -14,10 +15,12 @@ import ScheduleInterviewModal from '../../components/admin/ScheduleInterviewModa
 import Dashboard from '../../components/admin/Dashboard';
 import OffboardingManager from '../../components/admin/OffboardingManager';
 import { supabase } from '../../lib/supabase';
+import { isFuzzyMatch } from '../../utils/stringUtils';
 
 const JobManager = () => {
     const { jobs, addJob, updateJob, deleteJob } = useJobs();
-    const { user } = useAuth();
+    const { user, rolePermissions } = useAuth();
+    const { t } = useLanguage();
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isApplicantsModalOpen, setIsApplicantsModalOpen] = useState(false);
     const [currentJob, setCurrentJob] = useState(null);
@@ -34,6 +37,16 @@ const JobManager = () => {
     const [currentAnalysis, setCurrentAnalysis] = useState(null);
     const [analyzingIds, setAnalyzingIds] = useState(new Set());
     const [searchTerm, setSearchTerm] = useState('');
+    // Filter States for Jobs
+    const [selectedLocation, setSelectedLocation] = useState('All');
+    const [selectedCompany, setSelectedCompany] = useState('All');
+    const [selectedJobStatus, setSelectedJobStatus] = useState('All');
+
+    // Filter States for Applications
+    const [selectedAppPosition, setSelectedAppPosition] = useState('All');
+    const [selectedAppCompany, setSelectedAppCompany] = useState('All');
+    const [applicationStatusFilter, setApplicationStatusFilter] = useState('active');
+
     const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard', 'jobs', 'applications', 'calendar', 'upcoming'
     const [applications, setApplications] = useState([]);
     const [isLoadingApps, setIsLoadingApps] = useState(false);
@@ -96,7 +109,7 @@ const JobManager = () => {
                     return {
                         ...app,
                         jobTitle: app.job_title,
-                        resumeUrl: app.resume_url, // For consistency, though logic uses check
+                        resumeUrl: app.resume_url,
                         appliedAt: app.created_at,
                         onboardingStatus: onboardingInfo?.status || null,
                         onboardingVerifiedAt: onboardingInfo?.verifiedAt || null,
@@ -133,7 +146,7 @@ const JobManager = () => {
         setCurrentJob(null);
         setFormData({
             title: '',
-            company: 'Sunningdale Tech Ltd (HQ)',
+            company: (user?.role === 'site_admin' || user?.role === 'hr_user') ? user.company_name : 'Sunningdale Tech Ltd (HQ)',
             location: 'Singapore',
             type: 'Full-time',
             requirements: '',
@@ -159,6 +172,24 @@ const JobManager = () => {
             email: job.email,
             hiringManagerEmail: job.hiringManagerEmail || '',
             status: job.status,
+            highlights: job.highlights || '',
+            career_level: job.career_level || 'Senior Executive'
+        });
+        setIsModalOpen(true);
+    };
+
+    const handleCopy = (job) => {
+        setCurrentJob(null);
+        setFormData({
+            title: `${job.title} (Copy)`,
+            company: job.company,
+            location: job.location,
+            type: job.type,
+            requirements: job.requirements,
+            responsibilities: job.responsibilities,
+            email: job.email,
+            hiringManagerEmail: job.hiringManagerEmail || '',
+            status: job.status, // Can keep same status or set to Draft if we had one.
             highlights: job.highlights || '',
             career_level: job.career_level || 'Senior Executive'
         });
@@ -441,6 +472,48 @@ const JobManager = () => {
         });
     };
 
+    const handleArchiveApplication = (appId) => {
+        setStatusModal({
+            isOpen: true,
+            type: 'confirm',
+            title: 'Archive Application',
+            message: 'Are you sure you want to archive this application? It will be automatically deleted after 1 year.',
+            onConfirm: async () => {
+                setStatusModal(prev => ({ ...prev, isLoading: true }));
+                try {
+                    const response = await fetch(`/api/applications/${appId}/archive`, {
+                        method: 'PATCH'
+                    });
+
+                    if (!response.ok) {
+                        const errData = await response.json();
+                        throw new Error(errData.details || 'Failed to archive');
+                    }
+
+                    setApplications(prev => prev.map(app =>
+                        app.id === appId ? { ...app, status: 'archived' } : app
+                    ));
+                    setStatusModal({
+                        isOpen: true,
+                        type: 'success',
+                        title: 'Application Archived',
+                        message: 'The application has been successfully archived.',
+                        onConfirm: null
+                    });
+                } catch (error) {
+                    console.error('Error archiving application:', error);
+                    setStatusModal({
+                        isOpen: true,
+                        type: 'error',
+                        title: 'Error',
+                        message: `Failed to archive application: ${error.message}`,
+                        onConfirm: null
+                    });
+                }
+            }
+        });
+    };
+
     const handleScheduleInterview = (app) => {
         setScheduleModal({
             isOpen: true,
@@ -504,10 +577,18 @@ const JobManager = () => {
 
     const handleSubmit = (e) => {
         e.preventDefault();
+
+        // Sanitize emails: replace semicolons with commas to support multiple formats
+        const sanitizedFormData = {
+            ...formData,
+            email: formData.email ? formData.email.replace(/;/g, ',').replace(/\s+/g, ' ').trim() : '',
+            hiringManagerEmail: formData.hiringManagerEmail ? formData.hiringManagerEmail.replace(/;/g, ',').replace(/\s+/g, ' ').trim() : ''
+        };
+
         if (currentJob) {
-            updateJob(currentJob.id, formData);
+            updateJob(currentJob.id, sanitizedFormData);
         } else {
-            addJob({ ...formData, createdBy: user?.username });
+            addJob({ ...sanitizedFormData, createdBy: user?.username });
         }
         setIsModalOpen(false);
     };
@@ -582,31 +663,90 @@ const JobManager = () => {
     };
 
     // 1. Get jobs owned by user (Admins see all)
-    const ownedJobs = jobs.filter(job =>
-        user?.role === 'admin' ||
-        !job.createdBy ||
-        job.createdBy === user?.username
-    );
+    const ownedJobs = jobs.filter(job => {
+        if (user?.role === 'super_admin' || user?.role === 'admin') return true;
+
+        // Strict company check for Site Admin and HR User
+        if (user?.role === 'site_admin' || user?.role === 'hr_user') {
+            const isCreator = job.createdBy === user?.username;
+
+            // Check Main Company
+            if (user.company_name) {
+                if (isFuzzyMatch(user.company_name, job.company)) {
+                    return true;
+                }
+            }
+
+            // Check Additional Allowed Companies (Multi-Company Access)
+            if (user.allowed_companies && Array.isArray(user.allowed_companies)) {
+                const isAllowed = user.allowed_companies.some(allowed => isFuzzyMatch(allowed, job.company));
+                if (isAllowed) return true;
+            }
+
+            return isCreator;
+        }
+        return job.createdBy === user?.username;
+    });
 
     // 2. Filter applications based on visible jobs
     const ownedApplications = applications.filter(app =>
-        ownedJobs.some(job => job.title === app.jobTitle)
+        ownedJobs.some(job => job.id === app.job_id)
     );
+
+    // Derived filters
+    const uniqueLocations = ['All', ...new Set(ownedJobs.map(job => job.location).filter(Boolean))].sort();
+    const uniqueCompanies = ['All', ...new Set(ownedJobs.map(job => job.company).filter(Boolean))].sort();
+    const uniqueStatuses = ['All', ...new Set(ownedJobs.map(job => job.status).filter(Boolean))].sort();
 
     // 3. Apply search filter to owned jobs for display
     const filteredJobs = ownedJobs.filter(job => {
-        const matchesSearch = job.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            job.company.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            job.location.toLowerCase().includes(searchTerm.toLowerCase());
-        return matchesSearch;
+        // Location Filter
+        if (selectedLocation !== 'All' && job.location !== selectedLocation) return false;
+
+        // Company Filter
+        if (selectedCompany !== 'All' && job.company !== selectedCompany) return false;
+
+        // Status Filter
+        if (selectedJobStatus !== 'All' && job.status !== selectedJobStatus) return false;
+
+        // Title Search
+        if (searchTerm && !job.title.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+
+        return true;
     });
 
+    // Derived filters for Applications
+    const uniqueAppPositions = ['All', ...new Set(ownedApplications.map(app => app.jobTitle).filter(Boolean))].sort();
+    const uniqueAppCompanies = ['All', ...new Set(ownedApplications.map(app => {
+        const job = ownedJobs.find(j => j.id === app.job_id);
+        return job ? job.company : null;
+    }).filter(Boolean))].sort();
+
     // 4. Apply search filter to owned applications for display
-    const filteredApplications = ownedApplications.filter(app =>
-        app.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        app.jobTitle.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        app.email.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    const filteredApplications = ownedApplications.filter(app => {
+        // Status Scope Filter (Active vs Archived)
+        if (applicationStatusFilter === 'active' && app.status === 'archived') return false;
+        if (applicationStatusFilter === 'archived' && app.status !== 'archived') return false;
+
+        // Position Filter
+        if (selectedAppPosition !== 'All' && app.jobTitle !== selectedAppPosition) return false;
+
+        // Company Filter
+        if (selectedAppCompany !== 'All') {
+            const job = ownedJobs.find(j => j.id === app.job_id);
+            if (!job || job.company !== selectedAppCompany) return false;
+        }
+
+        // Search Filter
+        if (searchTerm) {
+            const searchLower = searchTerm.toLowerCase();
+            return app.name.toLowerCase().includes(searchLower) ||
+                app.jobTitle.toLowerCase().includes(searchLower) ||
+                app.email.toLowerCase().includes(searchLower);
+        }
+
+        return true;
+    });
 
     const handleViewOnboarding = async (applicationId) => {
         setIsLoadingOnboarding(true);
@@ -632,8 +772,8 @@ const JobManager = () => {
         <AdminLayout>
             <div className="mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-slate-800">Job Manager</h1>
-                    <p className="text-slate-500 mt-1">Manage your open positions and job listings</p>
+                    <h1 className="text-2xl font-bold text-slate-800">{t('jobManager')}</h1>
+                    <p className="text-slate-500 mt-1">{t('manageJobsDescription')}</p>
                 </div>
                 {activeTab === 'jobs' && (
                     <button
@@ -641,7 +781,7 @@ const JobManager = () => {
                         className="bg-primary text-white px-4 py-2.5 rounded-xl flex items-center gap-2 hover:bg-primary-dark transition-all shadow-sm hover:shadow-md active:scale-95"
                     >
                         <Plus size={20} />
-                        <span className="font-medium">Add New Job</span>
+                        <span className="font-medium">{t('createJob')}</span>
                     </button>
                 )}
             </div>
@@ -655,7 +795,7 @@ const JobManager = () => {
                         : 'text-slate-500 hover:text-slate-700'
                         }`}
                 >
-                    Dashboard
+                    {t('dashboard')}
                     {activeTab === 'dashboard' && (
                         <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-t-full"></div>
                     )}
@@ -667,7 +807,7 @@ const JobManager = () => {
                         : 'text-slate-500 hover:text-slate-700'
                         }`}
                 >
-                    Job Listings
+                    {t('jobListings')}
                     {activeTab === 'jobs' && (
                         <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-t-full"></div>
                     )}
@@ -679,7 +819,7 @@ const JobManager = () => {
                         : 'text-slate-500 hover:text-slate-700'
                         }`}
                 >
-                    Candidate Resume Pool
+                    {t('applications')}
                     {activeTab === 'applications' && (
                         <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-t-full"></div>
                     )}
@@ -691,7 +831,7 @@ const JobManager = () => {
                         : 'text-slate-500 hover:text-slate-700'
                         }`}
                 >
-                    Interview Calendar
+                    {t('calendar')}
                     {activeTab === 'calendar' && (
                         <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-t-full"></div>
                     )}
@@ -703,51 +843,166 @@ const JobManager = () => {
                         : 'text-slate-500 hover:text-slate-700'
                         }`}
                 >
-                    Upcoming Interviews
+                    {t('upcoming')}
                     {activeTab === 'upcoming' && (
                         <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-t-full"></div>
                     )}
                 </button>
-                <button
-                    onClick={() => setActiveTab('onboarding')}
-                    className={`pb-3 px-4 font-medium transition-colors relative ${activeTab === 'onboarding'
-                        ? 'text-primary'
-                        : 'text-slate-500 hover:text-slate-700'
-                        }`}
-                >
-                    Onboarding
-                    {activeTab === 'onboarding' && (
-                        <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-t-full"></div>
-                    )}
-                </button>
-                <button
-                    onClick={() => setActiveTab('offboarding')}
-                    className={`pb-3 px-4 font-medium transition-colors relative ${activeTab === 'offboarding'
-                        ? 'text-primary'
-                        : 'text-slate-500 hover:text-slate-700'
-                        }`}
-                >
-                    Offboarding
-                    {activeTab === 'offboarding' && (
-                        <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-t-full"></div>
-                    )}
-                </button>
+
+                {/* Onboarding Tab - Permission Gated */}
+                {(user?.role === 'super_admin' || user?.role === 'admin' || rolePermissions?.[user?.role]?.includes('/admin/jobs/onboarding')) && (
+                    <button
+                        onClick={() => setActiveTab('onboarding')}
+                        className={`pb-3 px-4 font-medium transition-colors relative ${activeTab === 'onboarding'
+                            ? 'text-primary'
+                            : 'text-slate-500 hover:text-slate-700'
+                            }`}
+                    >
+                        Onboarding
+                        {activeTab === 'onboarding' && (
+                            <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-t-full"></div>
+                        )}
+                    </button>
+                )}
+
+                {/* Offboarding Tab - Permission Gated */}
+                {(user?.role === 'super_admin' || user?.role === 'admin' || rolePermissions?.[user?.role]?.includes('/admin/jobs/offboarding')) && (
+                    <button
+                        onClick={() => setActiveTab('offboarding')}
+                        className={`pb-3 px-4 font-medium transition-colors relative ${activeTab === 'offboarding'
+                            ? 'text-primary'
+                            : 'text-slate-500 hover:text-slate-700'
+                            }`}
+                    >
+                        Offboarding
+                        {activeTab === 'offboarding' && (
+                            <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-t-full"></div>
+                        )}
+                    </button>
+                )}
             </div>
 
 
             {/* Search and Filter Bar - Hide for Calendar, Upcoming, Dashboard, and Offboarding */}
             {activeTab !== 'calendar' && activeTab !== 'upcoming' && activeTab !== 'dashboard' && activeTab !== 'offboarding' && (
                 <div className="mb-6 bg-white p-4 rounded-xl shadow-sm border border-slate-100">
-                    <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-                        <input
-                            type="text"
-                            placeholder={activeTab === 'jobs' ? "Search jobs by title, company, or location..." : "Search applications by name, job title, or email..."}
-                            className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                        />
-                    </div>
+                    {activeTab === 'jobs' ? (
+                        <div className="flex flex-col md:flex-row gap-4">
+                            {/* Location Filter */}
+                            <div className="relative md:w-1/4">
+                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                                    <MapPin size={18} />
+                                </div>
+                                <select
+                                    className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all appearance-none bg-white font-medium text-slate-700"
+                                    value={selectedLocation}
+                                    onChange={(e) => setSelectedLocation(e.target.value)}
+                                >
+                                    {uniqueLocations.map(loc => (
+                                        <option key={loc} value={loc}>{loc === 'All' ? t('allLocations') : loc}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {/* Company Filter */}
+                            <div className="relative md:w-1/4">
+                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                                    <Building2 size={18} />
+                                </div>
+                                <select
+                                    className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all appearance-none bg-white font-medium text-slate-700"
+                                    value={selectedCompany}
+                                    onChange={(e) => setSelectedCompany(e.target.value)}
+                                >
+                                    {uniqueCompanies.map(comp => (
+                                        <option key={comp} value={comp}>{comp === 'All' ? t('allCompanies') : comp}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {/* Status Filter */}
+                            <div className="relative md:w-1/4">
+                                <select
+                                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all appearance-none bg-white font-medium text-slate-700"
+                                    value={selectedJobStatus}
+                                    onChange={(e) => setSelectedJobStatus(e.target.value)}
+                                >
+                                    {uniqueStatuses.map(status => (
+                                        <option key={status} value={status}>{status === 'All' ? 'All Statuses' : status}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {/* Title Search */}
+                            <div className="relative flex-1">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                                <input
+                                    type="text"
+                                    placeholder={t('searchPlaceholder')}
+                                    className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                />
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="flex flex-col md:flex-row gap-4">
+                            {/* Entity Filter */}
+                            <div className="relative md:w-1/3">
+                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                                    <Building2 size={18} />
+                                </div>
+                                <select
+                                    className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all appearance-none bg-white font-medium text-slate-700"
+                                    value={selectedAppCompany}
+                                    onChange={(e) => setSelectedAppCompany(e.target.value)}
+                                >
+                                    {uniqueAppCompanies.map(comp => (
+                                        <option key={comp} value={comp}>{comp === 'All' ? 'All Entities' : comp}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {/* Position Filter */}
+                            <div className="relative md:w-1/4">
+                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                                    <Briefcase size={18} />
+                                </div>
+                                <select
+                                    className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all appearance-none bg-white font-medium text-slate-700"
+                                    value={selectedAppPosition}
+                                    onChange={(e) => setSelectedAppPosition(e.target.value)}
+                                >
+                                    {uniqueAppPositions.map(pos => (
+                                        <option key={pos} value={pos}>{pos === 'All' ? 'All Positions' : pos}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {/* Application Status Filter */}
+                            <div className="relative md:w-1/4">
+                                <select
+                                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all appearance-none bg-white font-medium text-slate-700"
+                                    value={applicationStatusFilter}
+                                    onChange={(e) => setApplicationStatusFilter(e.target.value)}
+                                >
+                                    <option value="active">Active Candidates</option>
+                                    <option value="archived">Archived Candidates</option>
+                                </select>
+                            </div>
+
+                            <div className="relative flex-1">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                                <input
+                                    type="text"
+                                    placeholder="Search by name, email or job title..."
+                                    className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                />
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -761,83 +1016,101 @@ const JobManager = () => {
             ) : activeTab === 'jobs' ? (
                 <>
                     {/* Job Grid */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {filteredJobs.map(job => {
-                            const appCount = applications.filter(app => app.jobTitle === job.title).length;
-                            return (
-                                <div key={job.id} className="group bg-white rounded-xl shadow-sm border border-slate-100 hover:shadow-md transition-all duration-200 flex flex-col">
-                                    <div className="p-6 flex-grow">
-                                        <div className="flex justify-between items-start mb-4">
-                                            <div className="p-2 bg-primary/5 text-primary rounded-lg">
-                                                <Briefcase size={24} />
-                                            </div>
-                                            <div className="flex gap-2">
-                                                {job.status === 'Inactive' && (
-                                                    <span className="text-xs font-bold px-2.5 py-1 bg-green-100 text-green-700 rounded-full flex items-center gap-1 border border-green-200">
-                                                        <CheckCircle size={12} /> Hired
+                    <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left">
+                                <thead className="bg-slate-50 border-b border-slate-100">
+                                    <tr>
+                                        <th className="px-6 py-4 font-semibold text-slate-700">{t('jobTitle')}</th>
+                                        <th className="px-6 py-4 font-semibold text-slate-700">{t('companyAndLocation')}</th>
+                                        <th className="px-6 py-4 font-semibold text-slate-700">{t('type')}</th>
+                                        <th className="px-6 py-4 font-semibold text-slate-700">{t('status')}</th>
+                                        <th className="px-6 py-4 font-semibold text-slate-700">{t('applications')}</th>
+                                        <th className="px-6 py-4 font-semibold text-slate-700">{t('actions')}</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                    {filteredJobs.map(job => {
+                                        const appCount = applications.filter(app => app.job_id === job.id).length;
+                                        return (
+                                            <tr key={job.id} className="group hover:bg-slate-50 transition-colors">
+                                                <td className="px-6 py-4">
+                                                    <div className="font-bold text-slate-800">{job.title}</div>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <div className="flex flex-col gap-1">
+                                                        <div className="flex items-center gap-2 text-sm text-slate-600">
+                                                            <Building2 size={14} />
+                                                            <span>{job.company}</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-2 text-sm text-slate-500">
+                                                            <MapPin size={14} />
+                                                            <span>{job.location}</span>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <span className="text-xs font-medium px-2.5 py-1 bg-slate-100 text-slate-600 rounded-full inline-block">
+                                                        {job.type}
                                                     </span>
-                                                )}
-                                                <span className="text-xs font-medium px-2.5 py-1 bg-slate-100 text-slate-600 rounded-full">
-                                                    {job.type}
-                                                </span>
-                                            </div>
-                                        </div>
-
-                                        <h3 className="text-lg font-bold text-slate-800 mb-2 group-hover:text-primary transition-colors">
-                                            {job.title}
-                                        </h3>
-
-                                        <div className="space-y-2 mb-4">
-                                            <div className="flex items-center gap-2 text-sm text-slate-500">
-                                                <Building2 size={16} />
-                                                <span>{job.company}</span>
-                                            </div>
-                                            <div className="flex items-center gap-2 text-sm text-slate-500">
-                                                <MapPin size={16} />
-                                                <span>{job.location}</span>
-                                            </div>
-                                        </div>
-
-                                        <div className="space-y-1">
-                                            <p className="text-xs font-semibold text-slate-400 uppercase">Highlights</p>
-                                            <p className="text-slate-600 text-sm line-clamp-2 leading-relaxed whitespace-pre-line">
-                                                {job.highlights}
-                                            </p>
-                                        </div>
-                                    </div>
-
-                                    <div className="p-4 border-t border-slate-100 bg-slate-50/50 rounded-b-xl flex justify-between items-center">
-                                        <div className="text-sm font-medium text-slate-500 flex items-center gap-1.5">
-                                            <Users size={16} className="text-slate-400" />
-                                            <span>{appCount} Applied</span>
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <button
-                                                onClick={() => handleViewApplicants(job)}
-                                                className="p-2 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                                title="View Applied Candidates"
-                                            >
-                                                <Users size={18} />
-                                            </button>
-                                            <button
-                                                onClick={() => handleEdit(job)}
-                                                className="p-2 text-slate-600 hover:text-primary hover:bg-primary/5 rounded-lg transition-colors"
-                                                title="Edit Job"
-                                            >
-                                                <Edit size={18} />
-                                            </button>
-                                            <button
-                                                onClick={() => handleDelete(job.id)}
-                                                className="p-2 text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                                title="Delete Job"
-                                            >
-                                                <Trash2 size={18} />
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        })}
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <div className="flex items-center gap-2">
+                                                        {job.status === 'Inactive' ? (
+                                                            <span className="text-xs font-bold px-2.5 py-1 bg-green-100 text-green-700 rounded-full flex items-center gap-1 border border-green-200">
+                                                                <CheckCircle size={12} /> Hired
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-xs font-medium px-2.5 py-1 bg-blue-50 text-blue-600 rounded-full border border-blue-100">
+                                                                Active
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <div className="text-sm font-medium text-slate-500 flex items-center gap-1.5">
+                                                        <Users size={16} className="text-slate-400" />
+                                                        <span>{appCount} Applied</span>
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <div className="flex gap-2">
+                                                        <button
+                                                            onClick={() => handleViewApplicants(job)}
+                                                            className="p-2 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                                            title="View Applied Candidates"
+                                                        >
+                                                            <Users size={18} />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleCopy(job)}
+                                                            className="p-2 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                                                            title="Copy as new"
+                                                        >
+                                                            <Copy size={18} />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleEdit(job)}
+                                                            className="p-2 text-slate-600 hover:text-primary hover:bg-primary/5 rounded-lg transition-colors"
+                                                            title="Edit Job"
+                                                        >
+                                                            <Edit size={18} />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleDelete(job.id)}
+                                                            className="p-2 text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                            title="Delete Job"
+                                                        >
+                                                            <Trash2 size={18} />
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
 
                     {filteredJobs.length === 0 && (
@@ -866,6 +1139,7 @@ const JobManager = () => {
                                             <th className="px-6 py-4 font-semibold text-slate-700">Contact</th>
                                             <th className="px-6 py-4 font-semibold text-slate-700">Date Applied</th>
                                             <th className="px-6 py-4 font-semibold text-slate-700">Resume</th>
+                                            <th className="px-6 py-4 font-semibold text-slate-700 text-center">Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
@@ -895,17 +1169,43 @@ const JobManager = () => {
                                                         <button
                                                             onClick={async () => {
                                                                 try {
+                                                                    console.log('[Resume Debug] Starting resume view');
+                                                                    console.log('[Resume Debug] Resume URL:', app.resumeUrl);
+                                                                    console.log('[Resume Debug] Is HTTP?:', app.resumeUrl.startsWith('http'));
+
                                                                     if (app.resumeUrl.startsWith('http')) {
+                                                                        console.log('[Resume Debug] Opening HTTP URL directly');
                                                                         window.open(app.resumeUrl, '_blank');
                                                                     } else {
-                                                                        const { data, error } = await supabase.storage
-                                                                            .from('resumes')
-                                                                            .createSignedUrl(app.resumeUrl, 60);
-                                                                        if (error) throw error;
-                                                                        window.open(data.signedUrl, '_blank');
+                                                                        console.log('[Resume Debug] Requesting signed URL from backend');
+
+                                                                        const response = await fetch('/api/resume-url', {
+                                                                            method: 'POST',
+                                                                            headers: { 'Content-Type': 'application/json' },
+                                                                            body: JSON.stringify({ resumePath: app.resumeUrl })
+                                                                        });
+
+                                                                        if (!response.ok) {
+                                                                            throw new Error('Failed to get signed URL');
+                                                                        }
+
+                                                                        const { signedUrl } = await response.json();
+                                                                        console.log('[Resume Debug] Got signed URL');
+
+                                                                        // Check if it's a DOCX file - use Office Online viewer
+                                                                        if (app.resumeUrl.toLowerCase().endsWith('.docx') ||
+                                                                            app.resumeUrl.toLowerCase().endsWith('.doc')) {
+                                                                            console.log('[Resume Debug] DOCX file - using Office Online viewer');
+                                                                            const officeViewerUrl = `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(signedUrl)}`;
+                                                                            window.open(officeViewerUrl, '_blank');
+                                                                        } else {
+                                                                            // PDF and other files - open directly
+                                                                            console.log('[Resume Debug] Opening file directly');
+                                                                            window.open(signedUrl, '_blank');
+                                                                        }
                                                                     }
                                                                 } catch (err) {
-                                                                    console.error('Error opening resume:', err);
+                                                                    console.error('[Resume Debug] Error opening resume:', err);
                                                                     alert('Could not access resume.');
                                                                 }
                                                             }}
@@ -916,6 +1216,26 @@ const JobManager = () => {
                                                     ) : (
                                                         <span className="text-slate-400 text-sm">No Resume</span>
                                                     )}
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <div className="flex items-center justify-center gap-2">
+                                                        {applicationStatusFilter === 'active' && (
+                                                            <button
+                                                                onClick={() => handleArchiveApplication(app.id)}
+                                                                className="p-2 text-slate-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-colors"
+                                                                title="Archive Application"
+                                                            >
+                                                                <Archive size={18} />
+                                                            </button>
+                                                        )}
+                                                        <button
+                                                            onClick={() => handleDeleteApplication(app.id)}
+                                                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                            title="Delete Application"
+                                                        >
+                                                            <Trash2 size={18} />
+                                                        </button>
+                                                    </div>
                                                 </td>
                                             </tr>
                                         ))}
@@ -1117,12 +1437,12 @@ const JobManager = () => {
                                     <div className="space-y-2">
                                         <label className="text-sm font-medium text-slate-700">Notification Email / 电子邮件</label>
                                         <input
-                                            type="email"
+                                            type="text"
                                             name="email"
                                             value={formData.email}
                                             onChange={handleChange}
                                             required
-                                            placeholder="hr@sdaletech.com"
+                                            placeholder="hr1@sdaletech.com, hr2@sdaletech.com"
                                             className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
                                         />
                                     </div>
@@ -1131,11 +1451,11 @@ const JobManager = () => {
                                     <div className="space-y-2">
                                         <label className="text-sm font-medium text-slate-700">Hiring Manager Email / 招聘经理电子邮件</label>
                                         <input
-                                            type="email"
+                                            type="text"
                                             name="hiringManagerEmail"
                                             value={formData.hiringManagerEmail || ''}
                                             onChange={handleChange}
-                                            placeholder="manager@sdaletech.com"
+                                            placeholder="manager1@sdaletech.com, manager2@sdaletech.com"
                                             className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
                                         />
                                     </div>
@@ -1170,7 +1490,11 @@ const JobManager = () => {
                                             name="company"
                                             value={formData.company}
                                             onChange={handleChange}
-                                            className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all bg-white"
+                                            disabled={user?.role === 'site_admin' || user?.role === 'hr_user'}
+                                            className={`w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all ${(user?.role === 'site_admin' || user?.role === 'hr_user')
+                                                ? 'bg-slate-100 text-slate-500 cursor-not-allowed'
+                                                : 'bg-white'
+                                                }`}
                                         >
                                             <option value="Sunningdale Tech Ltd (HQ)">Sunningdale Tech Ltd (HQ)</option>
                                             <option value="Sunningdale Precision Industries Ltd">Sunningdale Precision Industries Ltd</option>
@@ -1334,134 +1658,170 @@ const JobManager = () => {
                                                     <div className="w-16 h-16 bg-white text-slate-300 rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm">
                                                         <Users size={32} />
                                                     </div>
-                                                    <h3 className="text-lg font-medium text-slate-900">No candidates yet</h3>
-                                                    <p className="text-slate-500">No one has applied for this position yet.</p>
+                                                    <h3 className="text-lg font-medium text-slate-900">{t('noCandidates')}</h3>
+                                                    <p className="text-slate-500">{t('noCandidatesDesc')}</p>
                                                 </div>
                                             );
                                         }
 
                                         return (
-                                            <div className="overflow-x-auto rounded-xl border border-slate-100">
-                                                <table className="w-full text-left">
-                                                    <thead className="bg-slate-50 border-b border-slate-100">
-                                                        <tr>
-                                                            <th className="px-6 py-4 font-semibold text-slate-700">Candidate</th>
-                                                            <th className="px-6 py-4 font-semibold text-slate-700">Contact</th>
-                                                            <th className="px-6 py-4 font-semibold text-slate-700">Date Applied</th>
-                                                            <th className="px-6 py-4 font-semibold text-slate-700 text-center">Match Score</th>
-                                                            <th className="px-6 py-4 font-semibold text-slate-700 text-center">Actions</th>
-                                                            <th className="px-6 py-4 font-semibold text-slate-700 text-center">Status</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody className="divide-y divide-slate-100">
-                                                        {jobApplicants.map(app => (
-                                                            <tr key={app.id} className="hover:bg-slate-50/50 transition-colors">
-                                                                <td className="px-6 py-4">
-                                                                    <div className="font-medium text-slate-900">{app.name}</div>
-                                                                </td>
-                                                                <td className="px-6 py-4">
-                                                                    <div className="text-sm text-slate-600">
-                                                                        <div className="flex items-center gap-2 mb-1">
-                                                                            <Mail size={14} /> {app.email}
+                                            <>
+                                                <div className="overflow-x-auto rounded-xl border border-slate-100">
+                                                    <table className="w-full text-left">
+                                                        <thead className="bg-slate-50 border-b border-slate-100">
+                                                            <tr>
+                                                                <th className="px-6 py-4 font-semibold text-slate-700">{t('candidate')}</th>
+                                                                <th className="px-6 py-4 font-semibold text-slate-700">{t('contact')}</th>
+                                                                <th className="px-6 py-4 font-semibold text-slate-700">{t('dateApplied')}</th>
+                                                                <th className="px-6 py-4 font-semibold text-slate-700 text-center">{t('matchScore')}</th>
+                                                                <th className="px-6 py-4 font-semibold text-slate-700 text-center">{t('actions')}</th>
+                                                                <th className="px-6 py-4 font-semibold text-slate-700 text-center">{t('status')}</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="divide-y divide-slate-100">
+                                                            {jobApplicants.map(app => (
+                                                                <tr key={app.id} className="hover:bg-slate-50/50 transition-colors">
+                                                                    <td className="px-6 py-4">
+                                                                        <div className="font-medium text-slate-900">{app.name}</div>
+                                                                    </td>
+                                                                    <td className="px-6 py-4">
+                                                                        <div className="text-sm text-slate-600">
+                                                                            <div className="flex items-center gap-2 mb-1">
+                                                                                <Mail size={14} /> {app.email}
+                                                                            </div>
+                                                                            <div className="flex items-center gap-2">
+                                                                                <Users size={14} /> {app.phone}
+                                                                            </div>
                                                                         </div>
-                                                                        <div className="flex items-center gap-2">
-                                                                            <Users size={14} /> {app.phone}
-                                                                        </div>
-                                                                    </div>
-                                                                </td>
-                                                                <td className="px-6 py-4 text-slate-600 text-sm">
-                                                                    {new Date(app.appliedAt).toLocaleDateString()}
-                                                                </td>
-                                                                <td className="px-6 py-4 text-center">
-                                                                    {analyzingIds.has(app.id) ? (
-                                                                        <span className="text-slate-400 text-sm animate-pulse">Analyzing...</span>
-                                                                    ) : app.analysisError ? (
-                                                                        <button
-                                                                            onClick={() => handleAnalyze(app)}
-                                                                            className="px-3 py-1 rounded-full text-sm font-medium transition-colors bg-red-100 text-red-700 hover:bg-red-200"
-                                                                            title="Click to retry analysis"
-                                                                        >
-                                                                            Error (Retry)
-                                                                        </button>
-                                                                    ) : app.analysis ? (
-                                                                        (() => {
-                                                                            const score = app.analysis.scores?.overall ?? app.analysis.score ?? 0;
-                                                                            return (
-                                                                                <button
-                                                                                    onClick={() => handleAnalyze(app)}
-                                                                                    className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${score >= 80 ? 'bg-green-100 text-green-700 hover:bg-green-200' :
-                                                                                        score >= 50 ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200' :
-                                                                                            'bg-red-100 text-red-700 hover:bg-red-200'
-                                                                                        }`}
-                                                                                >
-                                                                                    {score}% Match
-                                                                                </button>
-                                                                            );
-                                                                        })()
-                                                                    ) : (
-                                                                        <button
-                                                                            onClick={() => handleAnalyze(app)}
-                                                                            className="text-primary hover:text-primary-dark text-sm font-medium hover:underline"
-                                                                        >
-                                                                            Analyze
-                                                                        </button>
-                                                                    )}
-                                                                </td>
-                                                                <td className="px-6 py-4">
-                                                                    <div className="flex items-center justify-center gap-3">
-                                                                        {/* View Resume Button Removed */}
-                                                                        {app.status !== 'hired' && (
+                                                                    </td>
+                                                                    <td className="px-6 py-4 text-slate-600 text-sm">
+                                                                        {new Date(app.appliedAt).toLocaleDateString()}
+                                                                    </td>
+                                                                    <td className="px-6 py-4 text-center">
+                                                                        {analyzingIds.has(app.id) ? (
+                                                                            <span className="text-slate-400 text-sm animate-pulse">Analyzing...</span>
+                                                                        ) : app.analysis?.error || app.analysis?.status?.startsWith('rejected_') ? (
                                                                             <button
-                                                                                onClick={() => handleScheduleInterview(app)}
-                                                                                className={`p-2 rounded-lg transition-colors ${app.status === 'interview_scheduled' || app.hasInterview ? 'text-green-600 bg-green-50 hover:bg-green-100' :
-                                                                                    app.status === 'interview_invited' ? 'text-blue-600 bg-blue-50 hover:bg-blue-100' :
-                                                                                        'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'
-                                                                                    }`}
-                                                                                title={
-                                                                                    app.status === 'interview_scheduled' || app.hasInterview ? "Interview Scheduled" :
-                                                                                        app.status === 'interview_invited' ? "Interview Invited" :
-                                                                                            "Schedule Interview"
-                                                                                }
+                                                                                onClick={() => handleAnalyze(app)}
+                                                                                className="px-3 py-1 rounded-full text-sm font-medium transition-colors bg-slate-100 text-slate-500 hover:bg-slate-200 border border-slate-200"
+                                                                                title={app.analysis.error || 'Invalid Document'}
                                                                             >
-                                                                                <Calendar size={18} />
+                                                                                Match Invalid
                                                                             </button>
-                                                                        )}
+                                                                        ) : app.analysis ? (
+                                                                            (() => {
+                                                                                const score = app.analysis.scores?.overall ?? app.analysis.score ?? 0;
+                                                                                // Double check for zero scores which indicate invalid analysis in zero-tolerance mode
+                                                                                if (score === 0 && app.analysis.is_resume === false) {
+                                                                                    return (
+                                                                                        <button
+                                                                                            onClick={() => handleAnalyze(app)}
+                                                                                            className="px-3 py-1 rounded-full text-sm font-medium transition-colors bg-slate-100 text-slate-500 hover:bg-slate-200 border border-slate-200"
+                                                                                            title="Document identified as non-resume"
+                                                                                        >
+                                                                                            Match Invalid
+                                                                                        </button>
+                                                                                    );
+                                                                                }
 
-
-
-
-
-                                                                        <button
-                                                                            onClick={() => handleDeleteApplication(app.id)}
-                                                                            className="p-2 text-slate-400 hover:text-red-600 transition-colors"
-                                                                            title="Delete Application"
-                                                                        >
-                                                                            <Trash2 size={18} />
-                                                                        </button>
-                                                                    </div>
-                                                                </td>
-                                                                <td className="px-6 py-4">
-                                                                    <div className="flex items-center justify-center">
-                                                                        {app.status === 'hired' ? (
-                                                                            <span className="inline-flex items-center justify-center px-4 py-1.5 bg-green-100 text-green-700 text-sm font-bold rounded-lg shadow-sm border border-green-200 cursor-default min-w-[3rem]">
-                                                                                Hired
-                                                                            </span>
+                                                                                return (
+                                                                                    <button
+                                                                                        onClick={() => handleAnalyze(app)}
+                                                                                        className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${score >= 80 ? 'bg-green-100 text-green-700 hover:bg-green-200' :
+                                                                                            score >= 50 ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200' :
+                                                                                                'bg-red-100 text-red-700 hover:bg-red-200'
+                                                                                            }`}
+                                                                                    >
+                                                                                        {score}% Match
+                                                                                    </button>
+                                                                                );
+                                                                            })()
                                                                         ) : (
                                                                             <button
-                                                                                onClick={() => handleHire(app)}
-                                                                                className="px-3 py-1.5 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary-dark transition-colors shadow-sm"
-                                                                                title="Hire Candidate"
+                                                                                onClick={() => handleAnalyze(app)}
+                                                                                className="text-primary hover:text-primary-dark text-sm font-medium hover:underline"
                                                                             >
-                                                                                Hire
+                                                                                Analyze
                                                                             </button>
                                                                         )}
-                                                                    </div>
-                                                                </td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
+                                                                    </td>
+                                                                    <td className="px-6 py-4">
+                                                                        <div className="flex items-center justify-center gap-3">
+                                                                            {/* View Resume Button Removed */}
+                                                                            {app.status !== 'hired' && (
+                                                                                <button
+                                                                                    onClick={() => handleScheduleInterview(app)}
+                                                                                    className={`p-2 rounded-lg transition-colors ${app.status === 'interview_scheduled' || app.hasInterview ? 'text-green-600 bg-green-50 hover:bg-green-100' :
+                                                                                        app.status === 'interview_invited' ? 'text-blue-600 bg-blue-50 hover:bg-blue-100' :
+                                                                                            'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'
+                                                                                        }`}
+                                                                                    title={
+                                                                                        app.status === 'interview_scheduled' || app.hasInterview ? "Interview Scheduled" :
+                                                                                            app.status === 'interview_invited' ? "Interview Invited" :
+                                                                                                "Schedule Interview"
+                                                                                    }
+                                                                                >
+                                                                                    <Calendar size={18} />
+                                                                                </button>
+                                                                            )}
+
+
+
+
+
+                                                                            <button
+                                                                                onClick={() => handleDeleteApplication(app.id)}
+                                                                                className="p-2 text-slate-400 hover:text-red-600 transition-colors"
+                                                                                title="Delete Application"
+                                                                            >
+                                                                                <Trash2 size={18} />
+                                                                            </button>
+                                                                        </div>
+                                                                    </td>
+                                                                    <td className="px-6 py-4">
+                                                                        <div className="flex items-center justify-center">
+                                                                            {app.status === 'hired' ? (
+                                                                                <span className="inline-flex items-center justify-center px-4 py-1.5 bg-green-100 text-green-700 text-sm font-bold rounded-lg shadow-sm border border-green-200 cursor-default min-w-[3rem]">
+                                                                                    Hired
+                                                                                </span>
+                                                                            ) : (
+                                                                                <button
+                                                                                    onClick={() => handleHire(app)}
+                                                                                    className="px-3 py-1.5 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary-dark transition-colors shadow-sm"
+                                                                                    title="Hire Candidate"
+                                                                                >
+                                                                                    Hire
+                                                                                </button>
+                                                                            )}
+                                                                        </div>
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                                <div className="mt-4 flex items-center gap-6 text-sm text-slate-500 bg-slate-50 p-3 rounded-lg border border-slate-100 table-auto w-auto mr-auto">
+                                                    <span className="font-semibold text-slate-700">{t('interviewStatus')}:</span>
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="p-1.5 rounded-md text-slate-400 bg-white border border-slate-200">
+                                                            <Calendar size={14} />
+                                                        </div>
+                                                        <span>{t('notScheduled')}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="p-1.5 rounded-md bg-blue-50 text-blue-600">
+                                                            <Calendar size={14} />
+                                                        </div>
+                                                        <span>{t('invited')}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="p-1.5 rounded-md bg-green-50 text-green-600">
+                                                            <Calendar size={14} />
+                                                        </div>
+                                                        <span>{t('scheduled')}</span>
+                                                    </div>
+                                                </div>
+                                            </>
                                         );
                                     })()
                                 )}

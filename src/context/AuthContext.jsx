@@ -1,6 +1,7 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import bcrypt from 'bcryptjs';
 import { useMsal, useIsAuthenticated } from "@azure/msal-react";
+import { supabase } from '../lib/supabase'; // Import Supabase client
 
 const AuthContext = createContext();
 
@@ -21,14 +22,16 @@ export const AuthProvider = ({ children }) => {
     const { instance, accounts } = useMsal();
     const isAuthenticatedMsal = useIsAuthenticated();
 
-    // Fetch users from backend on mount
-    useEffect(() => {
-        fetchUsers();
-    }, []);
+
 
     const fetchUsers = async () => {
+        const token = localStorage.getItem('token');
+        if (!token) return;
+
         try {
-            const response = await fetch('/api/users');
+            const response = await fetch('/api/users', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
             if (!response.ok) throw new Error('Failed to fetch users');
             const data = await response.json();
             setUsers(data);
@@ -40,119 +43,209 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
-    // Validate session on mount or when users change (Local Auth)
+
+
+
+
+
+    // Verify session on mount (Token based)
     useEffect(() => {
-        if (user && !loading && !isAuthenticatedMsal) {
-            // Only validate against local users if not logged in via MSAL
-            const userExists = users.find(u => u.username === user.username);
-            if (!userExists) {
-                // User no longer exists in the database, force logout (only if distinct from MSAL user)
-                // Note: MSAL user won't be in local DB likely, so we skip this check for them
-                if (!user.homeAccountId) { // Simple check if it's an MSAL account object
+        const checkSession = async () => {
+            const token = localStorage.getItem('token');
+            if (!token) {
+                setLoading(false);
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/auth/me', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (response.ok) {
+                    const userData = await response.json();
+                    setUser(userData);
+                    // Fetch users if session is valid
+                    fetchUsers();
+                } else {
                     logout();
                 }
+            } catch (err) {
+                console.error('Session check failed:', err);
+                logout();
+            } finally {
+                setLoading(false);
             }
-        }
-    }, [users, user, loading, isAuthenticatedMsal]);
+        };
 
-    // Sync MSAL Auth
+        checkSession();
+    }, []);
+
+    // Sync MSAL Auth (Entra ID)
     useEffect(() => {
-        // Wait for users to be loaded before checking auth
-        if (loading) return;
+        const handleMsalLogin = async () => {
+            if (loading) return; // Wait for local session check
+            if (user) return; // Already logged in
 
-        if (isAuthenticatedMsal && accounts.length > 0) {
-            const msalAccount = accounts[0];
-            const email = msalAccount.username;
+            if (isAuthenticatedMsal && accounts.length > 0) {
+                const msalAccount = accounts[0];
+                const email = msalAccount.username;
+                const name = msalAccount.name;
+                const oid = msalAccount.homeAccountId;
 
-            const dbUser = users.find(u =>
-                u.azure_oid === msalAccount.homeAccountId ||
-                u.username.toLowerCase() === email.toLowerCase() ||
-                u.email?.toLowerCase() === email.toLowerCase()
-            );
+                try {
+                    const response = await fetch('/api/auth/azure', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email, name, oid })
+                    });
 
-            if (dbUser) {
-                setUser({
-                    ...dbUser,
-                    homeAccountId: msalAccount.homeAccountId
-                });
-                setError(null); // Clear any previous login error
-            } else {
-                // User not found in DB - Deny Access
-                console.warn('Unauthorized Entra login attempt:', email);
-                setUser(null); // Ensure user is null if not found in DB
-                setError('You do not have permission to access the admin portal. Please contact an administrator.');
-
-                // Optional: Logout of MSAL context to prevent auto-login loop on refresh?
-                // If we don't logout, this effect runs again. 
-                // But we set User(null), so app stays on Login.
-                // However, isAuthenticatedMsal is still true.
-                // So this effect will keep hitting "else" and setting error. That's acceptable.
+                    if (response.ok) {
+                        const data = await response.json();
+                        localStorage.setItem('token', data.accessToken);
+                        localStorage.setItem('user', JSON.stringify(data.user));
+                        setUser(data.user);
+                        setError(null);
+                        fetchUsers(); // Load users after successful Entra login
+                    } else {
+                        const errData = await response.json();
+                        console.warn('Entra login failed:', errData.error);
+                        setError(errData.error || 'Unauthorized Entra login');
+                        setUser(null);
+                    }
+                } catch (err) {
+                    console.error('Entra login error:', err);
+                    setError('Failed to authenticate with server');
+                }
             }
-        }
-    }, [isAuthenticatedMsal, accounts, users, loading]);
+        };
+
+        handleMsalLogin();
+    }, [isAuthenticatedMsal, accounts, loading, user]);
+
+    // Fetch Users should ONLY happen if we are logged in (and likely Admin)
+    // Moving fetchUsers out of mount effect.
 
     // Role Permissions Management
     const defaultPermissions = {
+        super_admin: ['/admin/dashboard', '/admin/content', '/admin/analytics', '/admin/jobs', '/admin/users', '/admin/events'],
+        site_admin: ['/admin/dashboard', '/admin/content', '/admin/analytics', '/admin/jobs', '/admin/users', '/admin/events'],
+        hr_user: ['/admin/dashboard', '/admin/content', '/admin/jobs', '/admin/events'],
         admin: ['/admin/dashboard', '/admin/content', '/admin/analytics', '/admin/jobs', '/admin/users', '/admin/events'],
         marketing: ['/admin/dashboard', '/admin/content', '/admin/analytics', '/admin/events'],
         hr: ['/admin/dashboard', '/admin/content', '/admin/jobs', '/admin/events']
     };
 
-    const [rolePermissions, setRolePermissions] = useState(() => {
-        const savedPermissions = localStorage.getItem('rolePermissions');
-        return savedPermissions ? JSON.parse(savedPermissions) : defaultPermissions;
-    });
+    const [rolePermissions, setRolePermissions] = useState(defaultPermissions);
 
+    // Load permissions from Supabase
     useEffect(() => {
-        localStorage.setItem('rolePermissions', JSON.stringify(rolePermissions));
-    }, [rolePermissions]);
+        const fetchPermissions = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('role_permissions')
+                    .select('*');
 
-    const updateRolePermissions = (role, permissions) => {
+                if (error) {
+                    console.error('Error fetching role permissions:', error);
+                    return;
+                }
+
+                if (data && data.length > 0) {
+                    const loadedPermissions = { ...defaultPermissions }; // Start with defaults to ensure all roles exist
+                    data.forEach(row => {
+                        loadedPermissions[row.role] = row.permissions;
+                    });
+                    setRolePermissions(loadedPermissions);
+                } else {
+                    setRolePermissions(defaultPermissions);
+                }
+            } catch (err) {
+                console.error('Failed to load permissions:', err);
+            }
+        };
+        fetchPermissions();
+    }, []);
+
+    const updateRolePermissions = async (role, newPermissions) => {
+        // Optimistic update
         setRolePermissions(prev => ({
             ...prev,
-            [role]: permissions
+            [role]: newPermissions
         }));
+
+        try {
+            const { error } = await supabase
+                .from('role_permissions')
+                .upsert({
+                    role: role,
+                    permissions: newPermissions,
+                    updated_at: new Date().toISOString()
+                }, { onConflict: 'role' });
+
+            if (error) {
+                console.error('Failed to save role permissions to Supabase:', error);
+                // Optionally revert local state here if needed, but keeping it simple for now
+            }
+        } catch (err) {
+            console.error('Error updating role permissions:', err);
+        }
     };
 
-    const login = (username, password) => {
-        const foundUser = users.find(u => u.username === username);
-        if (foundUser && bcrypt.compareSync(password, foundUser.password)) {
-            // Don't store password in session
-            const { password, ...userWithoutPassword } = foundUser;
-            setUser(userWithoutPassword);
-            localStorage.setItem('user', JSON.stringify(userWithoutPassword));
-            localStorage.setItem('isAuthenticated', 'true'); // Keep for backward compatibility if needed
-            setError(null); // Clear any previous login error
+    const login = async (username, password) => {
+        try {
+            const response = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.error || 'Login failed');
+            }
+
+            const data = await response.json();
+            localStorage.setItem('token', data.accessToken);
+            localStorage.setItem('user', JSON.stringify(data.user)); // For fast load
+            setUser(data.user);
+            setError(null);
+
+            // Allow fetchUsers to run now that we have a token
+            fetchUsers();
+
             return true;
+        } catch (err) {
+            console.error('Login error:', err);
+            setError(err.message);
+            return false;
         }
-        setError('Invalid username or password.'); // Set error for local login failure
-        return false;
     };
 
     const logout = () => {
         setUser(null);
         localStorage.removeItem('user');
-        localStorage.removeItem('isAuthenticated');
-        setError(null); // Clear error on logout
+        localStorage.removeItem('token');
+        setError(null);
         if (isAuthenticatedMsal) {
             instance.logoutRedirect();
         }
     };
 
-    // User Management Functions
+    // User Management Functions - Secure
     const addUser = async (newUser) => {
+        const token = localStorage.getItem('token');
         try {
-            // Hash the password only if it exists (local users)
-            let userToSend = { ...newUser };
-            if (newUser.password) {
-                const hashedPassword = bcrypt.hashSync(newUser.password, 10);
-                userToSend.password = hashedPassword;
-            }
+            // ... same hash logic moved to server, so just send raw ...
+            // Wait, server expects raw password now to hash it.
 
             const response = await fetch('/api/users', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(userToSend)
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(newUser)
             });
 
             if (!response.ok) {
@@ -161,7 +254,7 @@ export const AuthProvider = ({ children }) => {
             }
 
             const createdUser = await response.json();
-            setUsers(prev => [...prev, createdUser]);
+            // setUsers(prev => [...prev, createdUser]); // Optimistic update
             return true;
         } catch (err) {
             console.error('Error adding user:', err);
@@ -170,17 +263,21 @@ export const AuthProvider = ({ children }) => {
     };
 
     const updateUser = async (id, updatedData) => {
+        const token = localStorage.getItem('token');
         try {
             const response = await fetch(`/api/users/${id}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
                 body: JSON.stringify(updatedData)
             });
 
             if (!response.ok) throw new Error('Failed to update user');
 
-            const savedUser = await response.json();
-            setUsers(prev => prev.map(u => u.id === id ? savedUser : u));
+            // const savedUser = await response.json();
+            // setUsers(prev => prev.map(u => u.id === id ? savedUser : u));
         } catch (err) {
             console.error('Error updating user:', err);
             throw err;
@@ -188,19 +285,22 @@ export const AuthProvider = ({ children }) => {
     };
 
     const deleteUser = async (id) => {
+        const token = localStorage.getItem('token');
         try {
             const response = await fetch(`/api/users/${id}`, {
-                method: 'DELETE'
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
             });
 
             if (!response.ok) throw new Error('Failed to delete user');
 
-            setUsers(prev => prev.filter(u => u.id !== id));
+            // setUsers(prev => prev.filter(u => u.id !== id));
         } catch (err) {
             console.error('Error deleting user:', err);
             throw err;
         }
     };
+
 
     return (
         <AuthContext.Provider value={{

@@ -20,24 +20,33 @@ const InterviewBooking = () => {
 
     const fetchData = async () => {
         try {
-            // 1. Fetch Application to verify and get name
-            // We need a public endpoint or we can use the existing one if not protected.
-            // The existing /api/applications is protected? No, it's not in server.js middleware check for this specific route.
-            // Wait, /api/applications returns ALL. We need a specific one.
-            // We can use the one we added for delete? No, that's DELETE.
-            // We need a GET /api/applications/:id.
-            // Actually, let's just fetch availability first.
-            // We might need to add a public endpoint to get candidate name by ID for personalization.
-            // For now, let's assume we can fetch it.
+            console.log(`[Interview Booking] Application ID from URL: ${applicationId}`);
 
-            // Fetch Slots for this specific application - logic: Show OPEN slots
+            // Fetch Slots for this specific application
+            // Show slots where:
+            // 1. application_id matches this candidate (candidate-specific slots)
+            // 2. application_id is NULL (public slots, backward compatibility)
+            const filterQuery = `application_id.eq.${applicationId},application_id.is.null`;
+            console.log(`[Interview Booking] Filter query: ${filterQuery}`);
+
             const { data, error } = await supabase
                 .from('interview_slots')
                 .select('*')
                 .eq('status', 'open')
+                .or(filterQuery)
                 .order('start_time', { ascending: true });
 
-            if (error) throw error;
+            if (error) {
+                console.error('[Interview Booking] Query error:', error);
+                throw error;
+            }
+
+            console.log(`[Interview Booking] Found ${data.length} slots for application ${applicationId}`);
+            console.log('[Interview Booking] Slot details:', data.map(s => ({
+                id: s.id,
+                start: s.start_time,
+                application_id: s.application_id
+            })));
 
             const slotsData = data.map(slot => ({
                 ...slot,

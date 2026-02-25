@@ -3,8 +3,7 @@ import nodemailer from 'nodemailer';
 import multer from 'multer';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { S3Client, PutObjectCommand, ListObjectsV2Command, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+// S3 Imports Removed
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
@@ -14,8 +13,6 @@ import tls from 'tls';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Bypass SSL verification for Supabase connection (Self-signed certificate issue)
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 dotenv.config();
 
@@ -54,18 +51,47 @@ console.error = (...args) => {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(cors());
+// CORS Configuration - Security: Only allow requests from authorized domains
+const corsOptions = {
+    origin: function (origin, callback) {
+        // Whitelist of allowed origins
+        const allowedOrigins = [
+            'https://test.sdaletech.com',
+            'https://www.sdaletech.com',
+            'https://sdaletech.com'
+        ];
+
+        // Allow development origins in non-production environments
+        if (process.env.NODE_ENV !== 'production') {
+            allowedOrigins.push('http://localhost:5173');
+            allowedOrigins.push('https://localhost:5173');
+            allowedOrigins.push('http://localhost:3000');
+        }
+
+        // Allow requests with no origin (mobile apps, Postman, server-to-server)
+        if (!origin) {
+            return callback(null, true);
+        }
+
+        // Check if origin is in whitelist
+        if (allowedOrigins.indexOf(origin) !== -1) {
+            callback(null, true);
+        } else {
+            console.warn(`CORS blocked request from unauthorized origin: ${origin}`);
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    credentials: true, // Allow cookies and authorization headers
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    maxAge: 86400 // Cache preflight requests for 24 hours
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
-// AWS Configuration
-const s3Client = new S3Client({
-    region: process.env.AWS_REGION,
-    credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
-    }
-});
+
+// AWS Configuration for Bedrock is handled with BedrockRuntimeClient import later
 
 // Supabase Configuration
 import { createClient } from '@supabase/supabase-js';
@@ -91,8 +117,169 @@ async function logAuditAction(category, action, details, performedBy = 'SYSTEM',
 }
 
 
-// API to fetch audit logs
-app.get('/api/audit-logs', async (req, res) => {
+
+
+// JWT Configuration
+// JWT Configuration
+import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
+
+// Generate a random secret if not provided (for dev/demo purposes)
+// In production, this should be a fixed secure string in .env
+const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('hex');
+
+// Middleware to authenticate JWT token
+const authenticateToken = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1]; // Bearer <token>
+
+    if (token == null) return res.sendStatus(401); // Unauthorized
+
+    jwt.verify(token, JWT_SECRET, (err, user) => {
+        if (err) return res.sendStatus(403); // Forbidden
+        req.user = user;
+        next();
+    });
+};
+
+// Email Configuration
+const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'smtp.office365.com',
+    port: process.env.SMTP_PORT || 587,
+    secure: false, // true for 465, false for other ports
+    auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS
+    },
+    tls: {
+        minVersion: 'TLSv1.2'
+    }
+});
+
+// Auth Routes
+app.post('/api/auth/login', async (req, res) => {
+    const { username, password } = req.body;
+
+    // 1. Check if user exists in Supabase
+    const { data: users, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('username', username);
+
+    if (error || !users || users.length === 0) {
+        return res.status(401).json({ error: 'Invalid username or password' });
+    }
+
+    const user = users[0];
+
+    // 2. Verify Password (using bcryptjs, assuming it's imported or used via require if strict ESM issue)
+    // Note: server.js doesn't import bcryptjs yet. We need to import it.
+    // Assuming we add: import bcrypt from 'bcryptjs'; at top.
+    // For now, let's assume we will add the import.
+
+    // If password is null (e.g. Entra user trying to login locally?), deny
+    if (!user.password) {
+        return res.status(401).json({ error: 'Please log in via SSO' });
+    }
+
+    // Check password
+    // We need to ensure bcrypt is available. 
+    // Since we are inside replace_file_content, I'll add the dynamic import or ensure standard import is added in another step if missing.
+    // Checking previous file content... it does NOT have bcryptjs. 
+    // I will add the import in a separate `replace_file_content` call or in this block if I can match the top.
+
+    // Wait, I cannot easily add import at top AND code in middle in one replace_file_content if they are far apart.
+    // I will assume I'll add import in next step. For now, I'll use dynamic import or require if compatible, 
+    // or just rely on global `bcrypt` if I added it... no I didn't.
+
+    // Actually, I should probably do the import addition first. 
+    // BUT, I'm already in this tool call. 
+    // Let's use `import bcrypt from 'bcryptjs'` at the top of this block since it's replacing lines 145-158 roughly. 
+    // No, lines 145 is Email Config.
+
+    // I will proceed with this block but likely need to add `import bcrypt from 'bcryptjs'` at the top of the file in a separate step.
+    // I will include the logic here.
+
+    const bcrypt = await import('bcryptjs');
+    const validPassword = await bcrypt.default.compare(password, user.password);
+
+    if (!validPassword) {
+        return res.status(401).json({ error: 'Invalid username or password' });
+    }
+
+    // 3. Generate Token
+    const userPayload = {
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        name: user.name,
+        company_name: user.company_name
+    };
+
+    const accessToken = jwt.sign(userPayload, JWT_SECRET, { expiresIn: '8h' });
+
+    res.json({ accessToken, user: userPayload });
+});
+
+// Entra ID Login Endpoint
+app.post('/api/auth/azure', async (req, res) => {
+    const { email, name, oid } = req.body;
+
+    if (!email) {
+        return res.status(400).json({ error: 'Email is required' });
+    }
+
+    try {
+        // 1. Check if user exists in Supabase (match by OID or Email)
+        let query = supabase
+            .from('users')
+            .select('*')
+            .or(`azure_oid.eq.${oid},email.ilike.${email},username.ilike.${email}`);
+
+        const { data: users, error } = await query;
+
+        if (error) {
+            console.error('Error fetching Entra user:', error);
+            return res.status(500).json({ error: 'Database error' });
+        }
+
+        if (!users || users.length === 0) {
+            console.warn(`Unauthorized Entra login attempt: ${email}`);
+            return res.status(401).json({ error: 'User not found in system. Please contact administrator.' });
+        }
+
+        const user = users[0];
+
+        // 2. Update OID if missing (optional, but good for future matching)
+        if (oid && !user.azure_oid) {
+            await supabase.from('users').update({ azure_oid: oid }).eq('id', user.id);
+        }
+
+        // 3. Generate Token
+        const userPayload = {
+            id: user.id,
+            username: user.username,
+            role: user.role,
+            name: user.name,
+            company_name: user.company_name
+        };
+
+        const accessToken = jwt.sign(userPayload, JWT_SECRET, { expiresIn: '8h' });
+
+        res.json({ accessToken, user: userPayload });
+
+    } catch (err) {
+        console.error('Entra login exception:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/api/auth/me', authenticateToken, (req, res) => {
+    res.json(req.user);
+});
+
+// API to fetch audit logs (Secured)
+app.get('/api/audit-logs', authenticateToken, async (req, res) => {
     try {
         const { data, error } = await supabase
             .from('audit_logs')
@@ -108,19 +295,6 @@ app.get('/api/audit-logs', async (req, res) => {
     }
 });
 
-// Email Configuration
-const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.office365.com',
-    port: process.env.SMTP_PORT || 587,
-    secure: false, // true for 465, false for other ports
-    auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS
-    },
-    tls: {
-        minVersion: 'TLSv1.2'
-    }
-});
 
 // Routes
 app.post('/api/contact', async (req, res) => {
@@ -167,294 +341,9 @@ app.post('/api/contact', async (req, res) => {
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
-app.get('/api/applications', async (req, res) => {
-    try {
-        if (!process.env.S3_BUCKET_NAME) {
-            return res.status(500).json({ error: 'S3 bucket not configured' });
-        }
+// /api/applications (S3) removed - see Supabase implementation
 
-        const command = new ListObjectsV2Command({
-            Bucket: process.env.S3_BUCKET_NAME,
-            Prefix: 'applications/'
-        });
-
-        const { Contents } = await s3Client.send(command);
-
-        if (!Contents || Contents.length === 0) {
-            return res.json([]);
-        }
-
-        // Filter out the folder itself or non-json files if necessary
-        const validFiles = Contents.filter(file => !file.Key.endsWith('/') && file.Size > 0);
-
-        const applications = await Promise.all(validFiles.map(async (file) => {
-            try {
-                const getCommand = new GetObjectCommand({
-                    Bucket: process.env.S3_BUCKET_NAME,
-                    Key: file.Key
-                });
-                const response = await s3Client.send(getCommand);
-                const str = await response.Body.transformToString();
-                const appData = JSON.parse(str);
-
-                // Enforce ID from filename to ensure consistency for deletion
-                // This fixes the 404 error if the internal JSON ID doesn't match the filename
-                const filenameId = path.basename(file.Key, '.json');
-                appData.id = filenameId;
-
-                // Generate Presigned URL for the resume if resumeKey exists
-                if (appData.resumeKey) {
-                    const resumeCommand = new GetObjectCommand({
-                        Bucket: process.env.S3_BUCKET_NAME,
-                        Key: appData.resumeKey
-                    });
-                    // URL expires in 1 hour (3600 seconds)
-                    appData.resumeUrl = await getSignedUrl(s3Client, resumeCommand, { expiresIn: 3600 });
-                }
-
-                return appData;
-            } catch (err) {
-                console.error(`Failed to parse application file ${file.Key}:`, err);
-                return null;
-            }
-        }));
-
-        // Filter out nulls (failed parses) and sort
-        const validApplications = applications.filter(app => app !== null);
-        validApplications.sort((a, b) => new Date(b.appliedAt) - new Date(a.appliedAt));
-
-        console.log(`Retrieved ${validApplications.length} applications from S3`);
-        res.json(validApplications);
-    } catch (error) {
-        console.error('Error fetching applications:', error);
-        res.status(500).json({ error: 'Failed to fetch applications' });
-    }
-});
-
-app.post('/api/apply', upload.single('resume'), async (req, res) => {
-    const { name, email, phone, coverLetter, jobTitle, recipient } = req.body;
-    const resume = req.file;
-
-    if (!name || !email || !phone || !resume) {
-        return res.status(400).json({ error: 'Required fields missing' });
-    }
-
-    const applicationId = uuidv4();
-    const resumeKey = `resumes/${applicationId}_${resume.originalname}`;
-    const dataKey = `applications/${applicationId}.json`;
-    let s3Url = '';
-
-    try {
-        if (process.env.S3_BUCKET_NAME) {
-            // 1. Upload Resume to S3
-            await s3Client.send(new PutObjectCommand({
-                Bucket: process.env.S3_BUCKET_NAME,
-                Key: resumeKey,
-                Body: resume.buffer,
-                ContentType: resume.mimetype
-            }));
-            s3Url = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${resumeKey}`;
-            console.log('Resume uploaded to S3:', s3Url);
-
-            // 2. Save Application Data as JSON to S3 (Cheaper alternative to DynamoDB)
-            const applicationData = {
-                id: applicationId,
-                jobTitle,
-                name,
-                email,
-                phone,
-                coverLetter,
-                resumeKey: resumeKey, // Store Key instead of URL
-                // resumeUrl: s3Url, // Legacy: keep for now or remove? Let's keep but rely on key.
-                appliedAt: new Date().toISOString(),
-                status: 'new'
-            };
-
-            await s3Client.send(new PutObjectCommand({
-                Bucket: process.env.S3_BUCKET_NAME,
-                Key: dataKey,
-                Body: JSON.stringify(applicationData, null, 2),
-                ContentType: 'application/json'
-            }));
-            console.log('Application data saved to S3');
-        }
-
-        // 3. Send Email Notification
-        const mailOptions = {
-            from: process.env.SMTP_USER,
-            to: recipient || process.env.SMTP_USER || 'stl-workflow@sdaletech.com',
-            subject: `[Job Application] ${jobTitle}: ${name}`,
-            text: `
-                New Job Application for ${jobTitle}
-                
-                Name: ${name}
-                Email: ${email}
-                Phone: ${phone}
-                
-                Cover Letter:
-                ${coverLetter || 'N/A'}
-                
-                Resume URL: ${s3Url || 'Attached'}
-            `,
-            html: `
-                <h3>New Job Application</h3>
-                <p><strong>Position:</strong> ${jobTitle}</p>
-                <p><strong>Name:</strong> ${name}</p>
-                <p><strong>Email:</strong> ${email}</p>
-                <p><strong>Phone:</strong> ${phone}</p>
-                <br/>
-                <p><strong>Cover Letter:</strong></p>
-                <p>${(coverLetter || 'N/A').replace(/\n/g, '<br>')}</p>
-                <br/>
-                ${s3Url ? `<p><strong>Resume:</strong> <a href="${s3Url}">Download Resume</a></p>` : ''}
-            `,
-            attachments: [
-                {
-                    filename: resume.originalname,
-                    content: resume.buffer
-                }
-            ]
-        };
-
-        await transporter.sendMail(mailOptions);
-        console.log('Application email sent successfully');
-
-        // Trigger Auto-Analysis (Fire and Forget)
-        console.log(`[Auto-Analyze] Triggering analysis for ${applicationId}`);
-        performAnalysis(applicationId, jobTitle)
-            .then(() => console.log(`[Auto-Analyze] Completed for ${applicationId}`))
-            .catch(err => console.error(`[Auto-Analyze] Failed for ${applicationId}:`, err));
-
-        res.status(200).json({ message: 'Application submitted successfully' });
-
-    } catch (error) {
-        console.error('Error processing application:', error);
-        res.status(500).json({ error: 'Failed to process application' });
-    }
-});
-
-
-
-// Job Management Routes
-const JOBS_S3_KEY = 'jobs/jobs.json';
-
-// Helper to get jobs from S3 or fallback to local file
-async function getJobsFromS3() {
-    try {
-        if (!process.env.S3_BUCKET_NAME) {
-            console.warn('S3_BUCKET_NAME not set, falling back to local file');
-            throw new Error('S3 not configured');
-        }
-
-        const command = new GetObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME,
-            Key: JOBS_S3_KEY
-        });
-        const response = await s3Client.send(command);
-        const str = await response.Body.transformToString();
-        return JSON.parse(str);
-    } catch (error) {
-        // If file doesn't exist in S3 or S3 error, fallback to local initial data
-        console.log('Fetching jobs from S3 failed or file missing, using default data:', error.message);
-        try {
-            const localPath = path.join(__dirname, 'src', 'data', 'jobs.json');
-            const data = fs.readFileSync(localPath, 'utf8');
-            return JSON.parse(data);
-        } catch (localError) {
-            console.error('Failed to read local jobs.json:', localError);
-            return [];
-        }
-    }
-}
-
-// Helper to save jobs to S3
-async function saveJobsToS3(jobs) {
-    if (!process.env.S3_BUCKET_NAME) {
-        throw new Error('S3_BUCKET_NAME not configured');
-    }
-
-    await s3Client.send(new PutObjectCommand({
-        Bucket: process.env.S3_BUCKET_NAME,
-        Key: JOBS_S3_KEY,
-        Body: JSON.stringify(jobs, null, 2),
-        ContentType: 'application/json'
-    }));
-}
-
-app.get('/api/jobs', async (req, res) => {
-    try {
-        const jobs = await getJobsFromS3();
-        res.json(jobs);
-    } catch (error) {
-        console.error('Error fetching jobs:', error);
-        res.status(500).json({ error: 'Failed to fetch jobs' });
-    }
-});
-
-app.post('/api/jobs', async (req, res) => {
-    try {
-        const newJob = req.body;
-        if (!newJob.title || !newJob.company) {
-            return res.status(400).json({ error: 'Title and Company are required' });
-        }
-
-        // Ensure ID
-        if (!newJob.id) {
-            newJob.id = Date.now();
-        }
-
-        const jobs = await getJobsFromS3();
-        jobs.push(newJob);
-
-        await saveJobsToS3(jobs);
-        res.status(201).json(newJob);
-    } catch (error) {
-        console.error('Error creating job:', error);
-        res.status(500).json({ error: 'Failed to create job' });
-    }
-});
-
-app.put('/api/jobs/:id', async (req, res) => {
-    try {
-        const { id } = req.params;
-        const updatedJob = req.body;
-        const jobs = await getJobsFromS3();
-
-        const index = jobs.findIndex(j => j.id == id);
-        if (index === -1) {
-            return res.status(404).json({ error: 'Job not found' });
-        }
-
-        // Preserve ID and update fields
-        jobs[index] = { ...jobs[index], ...updatedJob, id: jobs[index].id };
-
-        await saveJobsToS3(jobs);
-        res.json(jobs[index]);
-    } catch (error) {
-        console.error('Error updating job:', error);
-        res.status(500).json({ error: 'Failed to update job' });
-    }
-});
-
-app.delete('/api/jobs/:id', async (req, res) => {
-    try {
-        const { id } = req.params;
-        let jobs = await getJobsFromS3();
-
-        const initialLength = jobs.length;
-        jobs = jobs.filter(j => j.id != id);
-
-        if (jobs.length === initialLength) {
-            return res.status(404).json({ error: 'Job not found' });
-        }
-
-        await saveJobsToS3(jobs);
-        res.json({ message: 'Job deleted successfully' });
-    } catch (error) {
-        console.error('Error deleting job:', error);
-        res.status(500).json({ error: 'Failed to delete job' });
-    }
-});
+// Legacy S3 Job Management endpoints removed (replaced by Supabase JobContext)
 
 // User Management Routes
 // Using Supabase directly instead of S3
@@ -472,30 +361,41 @@ async function getUsersFromSupabase() {
     return data || [];
 }
 
-app.get('/api/users', async (req, res) => {
+app.get('/api/users', authenticateToken, async (req, res) => {
     try {
-        const users = await getUsersFromSupabase();
-        res.json(users);
+        const { company } = req.query;
+        // EXCLUDE PASSWORD HASH - Critical Security Fix
+        let query = supabase.from('users').select('id, username, name, role, email, company_name, azure_oid, created_at, allowed_companies');
+
+        if (company) {
+            query = query.eq('company_name', company);
+        }
+
+        const { data, error } = await query;
+
+        if (error) throw error;
+        res.json(data);
     } catch (error) {
         console.error('Error fetching users:', error);
         res.status(500).json({ error: 'Failed to fetch users' });
     }
 });
 
-app.post('/api/users', async (req, res) => {
+app.post('/api/users', authenticateToken, async (req, res) => {
     try {
         const newUser = req.body;
 
         // Validation:
-        // If it's a local user, need username/password.
-        // If it's an Entra user (has azure_oid), password might be empty.
-
         if (!newUser.username) {
             return res.status(400).json({ error: 'Username is required' });
         }
 
         if (!newUser.azure_oid && !newUser.password) {
             return res.status(400).json({ error: 'Password is required for local users' });
+        }
+
+        if (['site_admin', 'hr_user'].includes(newUser.role) && !newUser.company_name && !newUser.azure_oid) {
+            return res.status(400).json({ error: 'Company Name is required for Site Admin and HR User' });
         }
 
         // Check if username already exists in Supabase
@@ -520,23 +420,32 @@ app.post('/api/users', async (req, res) => {
         }
 
         // Insert into Supabase
+        // Hash password if provided
+        let hashedPassword = null;
+        if (newUser.password) {
+            const bcrypt = await import('bcryptjs');
+            hashedPassword = await bcrypt.default.hash(newUser.password, 10);
+        }
+
         const { data, error } = await supabase
             .from('users')
             .insert([{
                 username: newUser.username,
-                password: newUser.password || null,
+                password: hashedPassword, // Store hased password
                 name: newUser.name,
                 role: newUser.role || 'hr',
                 email: newUser.email,
                 azure_oid: newUser.azure_oid || null,
-                company_name: newUser.company_name || null
+                company_name: newUser.company_name || null,
+                allowed_companies: newUser.allowed_companies || []
             }])
-            .select();
+            .select('id, username, name, role, email, company_name, azure_oid, created_at, allowed_companies'); // Don't return password
 
         if (error) {
             throw error;
         }
 
+        logAuditAction('USER', 'CREATE', `Created user: ${newUser.username}`, req.user.username);
         res.status(201).json(data[0]);
     } catch (error) {
         console.error('Error creating user:', error);
@@ -544,20 +453,27 @@ app.post('/api/users', async (req, res) => {
     }
 });
 
-app.put('/api/users/:id', async (req, res) => {
+app.put('/api/users/:id', authenticateToken, async (req, res) => {
     try {
         const { id } = req.params;
         const updatedUser = req.body;
+
+        // If updating password, hash it
+        if (updatedUser.password) {
+            const bcrypt = await import('bcryptjs');
+            updatedUser.password = await bcrypt.default.hash(updatedUser.password, 10);
+        }
 
         const { data, error } = await supabase
             .from('users')
             .update(updatedUser)
             .eq('id', id)
-            .select();
+            .select('id, username, name, role, email, company_name, azure_oid, created_at, allowed_companies'); // Don't return password
 
         if (error) throw error;
         if (!data || data.length === 0) return res.status(404).json({ error: 'User not found' });
 
+        logAuditAction('USER', 'UPDATE', `Updated user: ${data[0].username}`, req.user.username);
         res.json(data[0]);
     } catch (error) {
         console.error('Error updating user:', error);
@@ -565,7 +481,7 @@ app.put('/api/users/:id', async (req, res) => {
     }
 });
 
-app.delete('/api/users/:id', async (req, res) => {
+app.delete('/api/users/:id', authenticateToken, async (req, res) => {
     try {
         const { id } = req.params;
         const { error } = await supabase
@@ -575,6 +491,7 @@ app.delete('/api/users/:id', async (req, res) => {
 
         if (error) throw error;
 
+        logAuditAction('USER', 'DELETE', `Deleted user ID: ${id}`, req.user.username);
         res.json({ message: 'User deleted successfully' });
     } catch (error) {
         console.error('Error deleting user:', error);
@@ -1249,164 +1166,42 @@ const bedrockClient = new BedrockRuntimeClient({
     region: process.env.AWS_REGION,
     credentials: {
         accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+        ...(process.env.AWS_SESSION_TOKEN && { sessionToken: process.env.AWS_SESSION_TOKEN })
     }
 });
 
 // Helper to extract text from resume buffer
 async function extractTextFromResume(buffer, mimetype) {
+    console.log(`[Analyze] Extracting text from mimetype: ${mimetype}`);
+
+    let text = '';
+
     if (mimetype === 'application/pdf') {
         const data = await pdf(buffer);
-        return data.text;
+        text = data.text;
     } else if (mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
         const result = await mammoth.extractRawText({ buffer: buffer });
-        return result.value;
+        text = result.value;
     } else if (mimetype === 'text/plain') {
-        return buffer.toString('utf-8');
+        text = buffer.toString('utf-8');
     } else {
-        // Fallback for other types
-        console.warn(`Unsupported mimetype for text extraction: ${mimetype}`);
-        return buffer.toString('utf-8'); // Try best effort
+        // STRICT: Throw error for unsupported types (images, unknown binaries)
+        throw new Error(`Unsupported file type for analysis: ${mimetype}. Please upload a PDF or Word document.`);
     }
+
+    // Clean up text
+    text = text.trim();
+
+    // Check for "ghost" text or failures
+    if (!text || text.length < 50) {
+        throw new Error('Extracted text is too short or empty. The file might be an image-only PDF or corrupted.');
+    }
+
+    return text;
 }
 
-// Shared Analysis Logic
-async function performAnalysis(applicationId, jobTitleOverride = null) {
-    console.log(`[Analyze] Starting analysis for application ID: ${applicationId}`);
-    try {
-        if (!process.env.S3_BUCKET_NAME) {
-            throw new Error('S3_BUCKET_NAME not set');
-        }
-
-        // 1. Fetch Application Data
-        const appKey = `applications/${applicationId}.json`;
-        const appCommand = new GetObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME,
-            Key: appKey
-        });
-        const appResponse = await s3Client.send(appCommand);
-        const appStr = await appResponse.Body.transformToString();
-        const appData = JSON.parse(appStr);
-
-        // 2. Fetch Resume File
-        if (!appData.resumeKey) {
-            throw new Error('No resumeKey found in application data');
-        }
-        console.log(`[Analyze] Fetching resume from S3: ${appData.resumeKey}`);
-        const resumeCommand = new GetObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME,
-            Key: appData.resumeKey
-        });
-        const resumeResponse = await s3Client.send(resumeCommand);
-        const resumeBuffer = await resumeResponse.Body.transformToByteArray();
-        const resumeText = await extractTextFromResume(Buffer.from(resumeBuffer), resumeResponse.ContentType);
-
-        // 3. Fetch Job Description
-        const jobs = await getJobsFromS3();
-        const targetTitle = jobTitleOverride || appData.jobTitle;
-        const job = jobs.find(j => j.title === targetTitle);
-
-        if (!job) {
-            throw new Error(`Job description not found for title: ${targetTitle}`);
-        }
-
-        const jdText = `
-            Title: ${job.title}
-            Company: ${job.company}
-            Location: ${job.location}
-            Type: ${job.type}
-            Highlights: ${job.highlights}
-            Responsibilities: ${job.responsibilities}
-            Requirements: ${job.requirements}
-            Career Level: ${job.career_level}
-        `;
-
-        // 4. Call Bedrock
-        console.log('[Analyze] Preparing Bedrock prompt...');
-        const prompt = `
-            You are an expert HR recruiter and technical interviewer. Analyze the following Candidate Resume against the Job Description.
-            
-            Job Description:
-            ${jdText}
-
-            Candidate Resume:
-            ${resumeText.substring(0, 20000)}
-
-            Provide a comprehensive analysis in JSON format with the following structure:
-            {
-                "scores": {
-                    "overall": <0-100>,
-                    "skills_match": <0-100>,
-                    "experience_match": <0-100>,
-                    "cultural_fit": <0-100>
-                },
-                "summary": "<Executive summary of the candidate's suitability, max 3 sentences>",
-                "technical_analysis": {
-                    "matched_skills": ["<skill 1>", "<skill 2>"],
-                    "missing_skills": ["<skill 1>", "<skill 2>"]
-                },
-                "soft_skills": ["<skill 1>", "<skill 2>"],
-                "red_flags": ["<concern 1>", "<concern 2>"]
-            }
-            Do not include any markdown formatting or explanations outside the JSON.
-        `;
-
-        const input = {
-            modelId: "anthropic.claude-3-haiku-20240307-v1:0",
-            contentType: "application/json",
-            accept: "application/json",
-            body: JSON.stringify({
-                anthropic_version: "bedrock-2023-05-31",
-                max_tokens: 1000,
-                messages: [
-                    {
-                        role: "user",
-                        content: [
-                            {
-                                type: "text",
-                                text: prompt
-                            }
-                        ]
-                    }
-                ]
-            })
-        };
-
-        console.log('[Analyze] Invoking Bedrock model...');
-        const command = new InvokeModelCommand(input);
-        const response = await bedrockClient.send(command);
-        const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-        const resultText = responseBody.content[0].text;
-
-        // Parse the JSON from the LLM response
-        let analysisResult;
-        try {
-            const jsonStr = resultText.replace(/```json/g, '').replace(/```/g, '').trim();
-            analysisResult = JSON.parse(jsonStr);
-        } catch (e) {
-            console.error('[Analyze] Failed to parse LLM response:', e);
-            console.error('[Analyze] Raw response:', resultText);
-            throw new Error('Failed to parse analysis result from AI model');
-        }
-
-        // 5. Save Analysis to Application Data in S3
-        console.log('[Analyze] Saving analysis to S3...');
-        appData.analysis = analysisResult;
-        await s3Client.send(new PutObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME,
-            Key: appKey,
-            Body: JSON.stringify(appData, null, 2),
-            ContentType: 'application/json'
-        }));
-
-        console.log('[Analyze] Analysis complete and saved');
-        return analysisResult;
-
-    } catch (error) {
-        console.error('[Analyze] Error in performAnalysis:', error);
-        throw error;
-    }
-}
+// performAnalysis S3 Removed
 
 app.post('/api/analyze-supabase-application/:id', async (req, res) => {
     console.log(`[Analyze] Request received for Supabase application ID: ${req.params.id}`);
@@ -1449,8 +1244,21 @@ app.post('/api/analyze-supabase-application/:id', async (req, res) => {
         const mimetype = fileData.type;
 
         // 3. Extract Text
-        console.log('[Analyze] Extracting text...');
-        const resumeText = await extractTextFromResume(buffer, mimetype || 'application/pdf'); // Default to pdf if unknown
+        let resumeText;
+        try {
+            resumeText = await extractTextFromResume(buffer, mimetype || 'application/pdf'); // Default to pdf if unknown
+        } catch (extractError) {
+            console.error(`[Analyze] Text extraction failed: ${extractError.message}`);
+            // Save error to database
+            await supabase
+                .from('applications')
+                .update({
+                    analysis: { error: extractError.message, status: 'failed' }
+                })
+                .eq('id', id);
+
+            return res.status(422).json({ error: extractError.message });
+        }
 
         // 4. Fetch Job Description (Mock or from DB? For now use specific known jobs or generic)
         // Since jobs are in local JSON or S3 in this code, but maybe also in Supabase 'jobs' table?
@@ -1478,22 +1286,7 @@ app.post('/api/analyze-supabase-application/:id', async (req, res) => {
         }
 
         if (!jdText) {
-            // Fallback to S3/Local jobs if not found in DB
-            const jobs = await getJobsFromS3();
-            const job = jobs.find(j => j.title === appData.job_title);
-            if (job) {
-                jdText = `
-                    Title: ${job.title}
-                    Company: ${job.company}
-                    Location: ${job.location}
-                    Highlights: ${job.highlights}
-                    Responsibilities: ${job.responsibilities}
-                    Requirements: ${job.requirements}
-                 `;
-            } else {
-                // Component-based fallback if really nothing found
-                jdText = `Job Title: ${appData.job_title}`;
-            }
+            throw new Error(`Job description not found for title: ${appData.job_title}`);
         }
 
         // 5. Call Bedrock
@@ -1507,6 +1300,11 @@ app.post('/api/analyze-supabase-application/:id', async (req, res) => {
             Candidate Resume:
             ${resumeText.substring(0, 20000)}
 
+            INSTRUCTIONS FOR SCORING:
+            1. Be highly critical and realistic. Do not give 90-100% unless the candidate is an exceptional, near-perfect match for a detailed job description.
+            2. If the Job Description is very sparse, empty, or lacks meaningful requirements and responsibilities (e.g. just placeholder text like "a", "b", "c"), you MUST NOT give a high score. Instead, penalize the score heavily (give below 40%) because a match cannot be verified. Explicitly state in the summary that the job description lacks detail.
+            3. Evaluate "skills_match", "experience_match", and "cultural_fit" strictly based on explicit evidence in the resume matching explicit requirements in the JD.
+
             Provide a comprehensive analysis in JSON format with the following structure:
             {
                 "scores": {
@@ -1516,7 +1314,7 @@ app.post('/api/analyze-supabase-application/:id', async (req, res) => {
                     "cultural_fit": <0-100>
                 },
                 "match": "<High|Medium|Low>",
-                "summary": "<Expert summary max 3 sentences focused on fit>",
+                "summary": "<Expert summary max 3 sentences focused on fit. Mention if JD is too sparse.>",
                 "technical_analysis": {
                     "matched_skills": ["<skill1>", "<skill2>"],
                     "missing_skills": ["<skill1>", "<skill2>"]
@@ -1554,6 +1352,75 @@ app.post('/api/analyze-supabase-application/:id', async (req, res) => {
             .eq('id', id);
 
         if (updateError) throw updateError;
+
+        // 7. Send Email Notification
+        try {
+            console.log('[Analyze] Sending notification email...');
+            // Fetch Job Details for Email
+            const { data: jobForEmail } = await supabase
+                .from('jobs')
+                .select('email, hiring_manager_email')
+                .eq('title', appData.job_title)
+                .maybeSingle();
+
+            const notificationEmail = jobForEmail?.email || process.env.SMTP_USER || 'stl-workflow@sdaletech.com';
+            const hiringManagerEmail = jobForEmail?.hiring_manager_email;
+
+            const recipients = [notificationEmail];
+            // Fix: Include Hiring Manager as requested by user
+            if (hiringManagerEmail && hiringManagerEmail !== notificationEmail) {
+                recipients.push(hiringManagerEmail);
+            }
+
+            // Generate Admin Link
+            // Use generic link if APP_URL not set
+            const adminLink = `${process.env.APP_URL || 'https://test.sdaletech.com'}/admin/jobs?tab=applications&search=${encodeURIComponent(appData.name)}`;
+
+            // Prepare Attachment
+            // Use stored original filename, or fallback to parsed name from path
+            const attachmentFilename = appData.resume_filename || filePath.split('/').pop() || `resume.${(mimetype || 'application/pdf').split('/')[1] || 'pdf'}`;
+
+            const mailOptions = {
+                attachments: [
+                    {
+                        filename: attachmentFilename,
+                        content: buffer,
+                        contentType: mimetype || 'application/pdf'
+                    }
+                ],
+                from: process.env.SMTP_USER,
+                to: recipients.join(', '),
+                subject: `[Job Application] ${appData.job_title}: ${appData.name}`,
+                html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                        <h2 style="color: #2563eb;">New Job Application</h2>
+                        <p><strong>Position:</strong> ${appData.job_title}</p>
+                        <p><strong>Candidate:</strong> ${appData.name}</p>
+                        <p><strong>Email:</strong> <a href="mailto:${appData.email}">${appData.email}</a></p>
+                        <p><strong>Phone:</strong> ${appData.phone}</p>
+                        
+                        <div style="margin: 20px 0; padding: 15px; background-color: #f8fafc; border-radius: 8px;">
+                            <p><strong>AI Analysis Summary:</strong></p>
+                            <p><em>"${analysisResult.summary}"</em></p>
+                            <p><strong>Match Score:</strong> ${analysisResult.scores?.overall || 'N/A'}/100</p>
+                        </div>
+
+                        <div style="text-align: center; margin: 30px 0;">
+                            <a href="${adminLink}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">
+                                Review Application
+                            </a>
+                        </div>
+                    </div>
+                `
+            };
+
+            await transporter.sendMail(mailOptions);
+            console.log(`[Analyze] Notification email sent to: ${recipients.join(', ')}`);
+
+        } catch (emailErr) {
+            console.error('[Analyze] Failed to send email:', emailErr);
+            // Don't block the response if email fails
+        }
 
         console.log('[Analyze] Success!');
         res.json(analysisResult);
@@ -1618,6 +1485,33 @@ app.delete('/api/applications/:id', async (req, res) => {
     } catch (error) {
         console.error('[Delete] Error:', error);
         res.status(500).json({ error: 'Delete failed', details: error.message });
+    }
+});
+
+app.patch('/api/applications/:id/archive', async (req, res) => {
+    console.log(`[Archive] Request received for application ID: ${req.params.id}`);
+    try {
+        const { id } = req.params;
+
+        const { data, error } = await supabase
+            .from('applications')
+            .update({
+                status: 'archived',
+                archived_at: new Date().toISOString()
+            })
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) {
+            throw new Error(`Failed to archive application: ${error.message}`);
+        }
+
+        console.log(`[Archive] Application ${id} archived successfully`);
+        res.json({ message: 'Application archived successfully', data });
+    } catch (error) {
+        console.error('[Archive] Error:', error);
+        res.status(500).json({ error: 'Archive failed', details: error.message });
     }
 });
 
@@ -2037,69 +1931,65 @@ app.post('/api/integrations/ad/provision', async (req, res) => {
     }
 });
 
-app.post('/api/analyze-application/:id', async (req, res) => {
-    console.log(`[Analyze] Request received for application ID: ${req.params.id}`);
-    try {
-        const { id } = req.params;
-        const { jobTitle } = req.body;
-
-        const result = await performAnalysis(id, jobTitle);
-        res.json(result);
-
-    } catch (error) {
-        console.error('[Analyze] Error analyzing application:', error);
-        if (error.message === 'No resumeKey found in application data') {
-            return res.status(400).json({ error: 'No resume found for this application' });
-        }
-        res.status(500).json({ error: 'Failed to analyze application', details: error.message });
-    }
-});
+// /api/analyze-application/:id (S3) Removed
 
 app.post('/api/generate-questions/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        console.log(`[Questions] Generating interview questions for application ID: ${id}`);
+        console.log(`[Questions] Generating interview questions for application ID: ${id} (Supabase)`);
 
-        if (!process.env.S3_BUCKET_NAME) {
-            return res.status(500).json({ error: 'S3 bucket not configured' });
+        // 1. Fetch Application Data from Supabase
+        const { data: appData, error: appError } = await supabase
+            .from('applications')
+            .select('*')
+            .eq('id', id)
+            .single();
+
+        if (appError || !appData) {
+            return res.status(404).json({ error: 'Application not found' });
         }
 
-        // 1. Fetch Application Data
-        const appKey = `applications/${id}.json`;
-        const appCommand = new GetObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME,
-            Key: appKey
-        });
-        const appResponse = await s3Client.send(appCommand);
-        const appStr = await appResponse.Body.transformToString();
-        const appData = JSON.parse(appStr);
-
-        // 2. Fetch Resume Text (Re-extract or store? We need to re-fetch/extract)
-        // Optimization: We could store extracted text in appData to save processing, 
-        // but for now let's re-fetch to keep it simple and stateless.
-        if (!appData.resumeKey) {
-            return res.status(400).json({ error: 'No resume found' });
+        // 2. Fetch Resume File from Supabase Storage
+        if (!appData.resume_url) {
+            return res.status(400).json({ error: 'No resume URL found in application' });
         }
 
-        const resumeCommand = new GetObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME,
-            Key: appData.resumeKey
-        });
-        const resumeResponse = await s3Client.send(resumeCommand);
-        const resumeBuffer = await resumeResponse.Body.transformToByteArray();
-        const resumeText = await extractTextFromResume(Buffer.from(resumeBuffer), resumeResponse.ContentType);
+        const filePath = appData.resume_url;
+        const { data: fileData, error: fileError } = await supabase.storage
+            .from('resumes')
+            .download(filePath);
 
-        // 3. Fetch Job Description
-        const jobs = await getJobsFromS3();
-        const job = jobs.find(j => j.title === appData.jobTitle);
+        if (fileError || !fileData) {
+            return res.status(500).json({ error: 'Failed to download resume' });
+        }
 
-        const jdText = job ? `
-            Title: ${job.title}
-            Responsibilities: ${job.responsibilities}
-            Requirements: ${job.requirements}
-        ` : `Job Title: ${appData.jobTitle}`;
+        const buffer = Buffer.from(await fileData.arrayBuffer());
+        const mimetype = fileData.type || 'application/pdf';
 
-        // 4. Call Bedrock for Questions
+        // 3. Extract Text
+        let resumeText = await extractTextFromResume(buffer, mimetype);
+
+        // 4. Fetch Job Description from Supabase
+        let jdText = '';
+        if (appData.job_title) {
+            const { data: jobData } = await supabase
+                .from('jobs')
+                .select('*')
+                .ilike('title', appData.job_title)
+                .maybeSingle();
+
+            if (jobData) {
+                jdText = `
+                    Title: ${jobData.title}
+                    Responsibilities: ${jobData.responsibilities}
+                    Requirements: ${jobData.requirements}
+                `;
+            }
+        }
+
+        if (!jdText) jdText = `Job Title: ${appData.job_title}`;
+
+        // 5. Call Bedrock
         const prompt = `
             Based on the following Job Description and Candidate Resume, generate 5 targeted interview questions.
             
@@ -2113,7 +2003,10 @@ app.post('/api/generate-questions/:id', async (req, res) => {
             {
                 "interview_questions": [
                     { "question": "...", "context": "..." },
-                    ...
+                    { "question": "...", "context": "..." },
+                    { "question": "...", "context": "..." },
+                    { "question": "...", "context": "..." },
+                    { "question": "...", "context": "..." }
                 ]
             }
         `;
@@ -2137,22 +2030,25 @@ app.post('/api/generate-questions/:id', async (req, res) => {
         const jsonStr = resultText.replace(/```json/g, '').replace(/```/g, '').trim();
         const questionsResult = JSON.parse(jsonStr);
 
-        // 5. Update Application Data with Questions
-        if (!appData.analysis) appData.analysis = {};
-        appData.analysis.interview_questions = questionsResult.interview_questions;
+        // 6. Update Application Data with Questions in Supabase
+        // Merge with existing analysis if possible
+        const existingAnalysis = appData.analysis || {};
+        const updatedAnalysis = { ...existingAnalysis, interview_questions: questionsResult.interview_questions };
 
-        await s3Client.send(new PutObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME,
-            Key: appKey,
-            Body: JSON.stringify(appData, null, 2),
-            ContentType: 'application/json'
-        }));
+        const { error: updateError } = await supabase
+            .from('applications')
+            .update({ analysis: updatedAnalysis })
+            .eq('id', id);
+
+        if (updateError) {
+            console.error('Failed to update questions in DB:', updateError);
+        }
 
         res.json(questionsResult);
 
     } catch (error) {
-        console.error('[Questions] Error generating questions:', error);
-        res.status(500).json({ error: 'Failed to generate questions' });
+        console.error('Error generating questions:', error);
+        res.status(500).json({ error: 'Failed to generate questions', details: error.message });
     }
 });
 
@@ -2258,55 +2154,60 @@ app.post('/api/schedule-interview', async (req, res) => {
     }
 });
 
-// Event Management Routes
-const EVENTS_S3_KEY = 'events/events.json';
+// Event Management Routes (Local JSON)
+const EVENTS_FILE = path.join(__dirname, 'src', 'data', 'events.json');
 
-// Helper to get events from S3 or fallback to local file
-async function getEventsFromS3() {
+// Helper to get events from local file
+function getEvents() {
     try {
-        if (!process.env.S3_BUCKET_NAME) {
-            console.warn('S3_BUCKET_NAME not set, falling back to local file');
-            throw new Error('S3 not configured');
+        if (!fs.existsSync(EVENTS_FILE)) {
+            // Initialize if missing
+            const initialData = [
+                {
+                    "id": 1,
+                    "title": "Annual Technology Summit 2025",
+                    "date": "2025-03-15",
+                    "endDate": "2025-03-17",
+                    "location": "Singapore Expo",
+                    "description": "Join us for our annual technology summit where we showcase our latest innovations in precision engineering and mould making.",
+                    "image": "https://images.unsplash.com/photo-1540575467063-178a50c2df87?ixlib=rb-4.0.3&auto=format&fit=crop&w=2070&q=80"
+                },
+                {
+                    "id": 2,
+                    "title": "Community Outreach Program",
+                    "date": "2025-04-20",
+                    "endDate": "",
+                    "location": "Jurong West Community Center",
+                    "description": "Sunningdale Tech employees giving back to the community through our annual outreach program.",
+                    "image": "https://images.unsplash.com/photo-1559027615-cd4628902d4a?ixlib=rb-4.0.3&auto=format&fit=crop&w=2074&q=80"
+                }
+            ];
+            fs.mkdirSync(path.dirname(EVENTS_FILE), { recursive: true });
+            fs.writeFileSync(EVENTS_FILE, JSON.stringify(initialData, null, 2));
+            return initialData;
         }
-
-        const command = new GetObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME,
-            Key: EVENTS_S3_KEY
-        });
-        const response = await s3Client.send(command);
-        const str = await response.Body.transformToString();
-        return JSON.parse(str);
+        const data = fs.readFileSync(EVENTS_FILE, 'utf8');
+        return JSON.parse(data);
     } catch (error) {
-        // If file doesn't exist in S3 or S3 error, fallback to local initial data
-        console.log('Fetching events from S3 failed or file missing, using default data:', error.message);
-        try {
-            const localPath = path.join(__dirname, 'src', 'data', 'events.json');
-            const data = fs.readFileSync(localPath, 'utf8');
-            return JSON.parse(data);
-        } catch (localError) {
-            console.error('Failed to read local events.json:', localError);
-            return [];
-        }
+        console.error('Error reading events file:', error);
+        return [];
     }
 }
 
-// Helper to save events to S3
-async function saveEventsToS3(events) {
-    if (!process.env.S3_BUCKET_NAME) {
-        throw new Error('S3_BUCKET_NAME not configured');
-    }
-
-    await s3Client.send(new PutObjectCommand({
-        Bucket: process.env.S3_BUCKET_NAME,
-        Key: EVENTS_S3_KEY,
-        Body: JSON.stringify(events, null, 2),
-        ContentType: 'application/json'
-    }));
-}
-
-app.get('/api/events', async (req, res) => {
+// Helper to save events to local file
+function saveEvents(events) {
     try {
-        const events = await getEventsFromS3();
+        fs.mkdirSync(path.dirname(EVENTS_FILE), { recursive: true });
+        fs.writeFileSync(EVENTS_FILE, JSON.stringify(events, null, 2));
+    } catch (error) {
+        console.error('Error saving events file:', error);
+        throw new Error('Failed to save events');
+    }
+}
+
+app.get('/api/events', (req, res) => {
+    try {
+        const events = getEvents();
         res.json(events);
     } catch (error) {
         console.error('Error fetching events:', error);
@@ -2314,7 +2215,7 @@ app.get('/api/events', async (req, res) => {
     }
 });
 
-app.post('/api/events', async (req, res) => {
+app.post('/api/events', (req, res) => {
     try {
         const newEvent = req.body;
         if (!newEvent.title || !newEvent.date) {
@@ -2326,10 +2227,10 @@ app.post('/api/events', async (req, res) => {
             newEvent.id = Date.now();
         }
 
-        const events = await getEventsFromS3();
+        const events = getEvents();
         events.push(newEvent);
 
-        await saveEventsToS3(events);
+        saveEvents(events);
         res.status(201).json(newEvent);
     } catch (error) {
         console.error('Error creating event:', error);
@@ -2337,11 +2238,11 @@ app.post('/api/events', async (req, res) => {
     }
 });
 
-app.put('/api/events/:id', async (req, res) => {
+app.put('/api/events/:id', (req, res) => {
     try {
         const { id } = req.params;
         const updatedEvent = req.body;
-        const events = await getEventsFromS3();
+        const events = getEvents();
 
         const index = events.findIndex(e => e.id == id);
         if (index === -1) {
@@ -2351,7 +2252,7 @@ app.put('/api/events/:id', async (req, res) => {
         // Preserve ID and update fields
         events[index] = { ...events[index], ...updatedEvent, id: events[index].id };
 
-        await saveEventsToS3(events);
+        saveEvents(events);
         res.json(events[index]);
     } catch (error) {
         console.error('Error updating event:', error);
@@ -2359,10 +2260,10 @@ app.put('/api/events/:id', async (req, res) => {
     }
 });
 
-app.delete('/api/events/:id', async (req, res) => {
+app.delete('/api/events/:id', (req, res) => {
     try {
         const { id } = req.params;
-        let events = await getEventsFromS3();
+        let events = getEvents();
 
         const initialLength = events.length;
         events = events.filter(e => e.id != id);
@@ -2371,7 +2272,7 @@ app.delete('/api/events/:id', async (req, res) => {
             return res.status(404).json({ error: 'Event not found' });
         }
 
-        await saveEventsToS3(events);
+        saveEvents(events);
         res.json({ message: 'Event deleted successfully' });
     } catch (error) {
         console.error('Error deleting event:', error);
@@ -2380,103 +2281,8 @@ app.delete('/api/events/:id', async (req, res) => {
 });
 
 // --- Availability & Scheduling Endpoints ---
+// Legacy S3 Availability API Removed (Unused)
 
-const AVAILABILITY_KEY = 'availability.json';
-
-async function getAvailability() {
-    try {
-        const command = new GetObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME,
-            Key: AVAILABILITY_KEY
-        });
-        const response = await s3Client.send(command);
-        const str = await response.Body.transformToString();
-        return JSON.parse(str);
-    } catch (error) {
-        if (error.name === 'NoSuchKey') return [];
-        throw error;
-    }
-}
-
-async function saveAvailability(slots) {
-    const command = new PutObjectCommand({
-        Bucket: process.env.S3_BUCKET_NAME,
-        Key: AVAILABILITY_KEY,
-        Body: JSON.stringify(slots),
-        ContentType: 'application/json'
-    });
-    await s3Client.send(command);
-}
-
-// Get all availability slots
-app.get('/api/availability', async (req, res) => {
-    try {
-        const slots = await getAvailability();
-        // Optional: Filter by status or applicationId
-        const { status, applicationId } = req.query;
-
-        let filtered = slots;
-
-        if (status) {
-            filtered = filtered.filter(s => s.status === status);
-        }
-
-        if (applicationId) {
-            // If applicationId is provided, we want slots proposed for this application
-            // OR slots that are already booked by this application
-            filtered = filtered.filter(s =>
-                (s.status === 'proposed' && s.applicationId === applicationId) ||
-                (s.bookedBy?.applicationId === applicationId)
-            );
-        }
-
-        res.json(filtered);
-    } catch (error) {
-        console.error('Error fetching availability:', error);
-        res.status(500).json({ error: 'Failed to fetch availability' });
-    }
-});
-
-// Add new availability slot
-app.post('/api/availability', async (req, res) => {
-    try {
-        const { startTime, endTime } = req.body;
-        if (!startTime || !endTime) {
-            return res.status(400).json({ error: 'Start and end time required' });
-        }
-
-        const slots = await getAvailability();
-        const newSlot = {
-            id: uuidv4(),
-            startTime,
-            endTime,
-            status: 'open',
-            bookedBy: null
-        };
-
-        slots.push(newSlot);
-        await saveAvailability(slots);
-
-        res.json(newSlot);
-    } catch (error) {
-        console.error('Error adding availability:', error);
-        res.status(500).json({ error: 'Failed to add availability' });
-    }
-});
-
-// Delete availability slot
-app.delete('/api/availability/:id', async (req, res) => {
-    try {
-        const { id } = req.params;
-        let slots = await getAvailability();
-        slots = slots.filter(s => s.id !== id);
-        await saveAvailability(slots);
-        res.json({ message: 'Slot deleted' });
-    } catch (error) {
-        console.error('Error deleting availability:', error);
-        res.status(500).json({ error: 'Failed to delete availability' });
-    }
-});
 
 // Book an interview slot
 app.post('/api/book-interview', async (req, res) => {
@@ -2705,57 +2511,246 @@ app.post('/api/book-interview', async (req, res) => {
                 to: toField, // Use dynamic recipients
                 subject: `Interview Confirmed: ${appData.name} - ${appData.job_title}`,
                 text: `
-Interview Confirmed
+Interview Confirmed!
 
-Candidate: ${appData.name}
-Position: ${appData.job_title}
-Time: ${dateString}
+Hello ${appData.name},
+
+We're excited to meet with you! Your interview for the ${appData.job_title} position has been confirmed.
+
+Interview Details:
+- Candidate: ${appData.name}
+- Position: ${appData.job_title}
+- Date & Time: ${dateString}
+- Location: ${isOnsite ? locationText : 'Microsoft Teams Meeting'}
+
 ${teamsLinkTxt}
 
-A calendar invitation is attached to this email.
+A calendar invitation (.ics file) has been attached to this email. Please accept it to automatically add this interview to your calendar.
+
+Interview Tips:
+- Join the meeting 5 minutes early to test your connection
+- Ensure you're in a quiet environment with good lighting
+- Have a copy of your resume and any questions ready
+
+We're looking forward to speaking with you!
+
+Best regards,
+Sunningdale Tech Ltd
                 `,
                 html: `
-                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 10px; overflow: hidden;">
-                        <div style="background-color: #2563eb; color: white; padding: 20px; text-align: center;">
-                            <h2 style="margin: 0;">Interview Confirmed</h2>
-                        </div>
-                        <div style="padding: 30px; color: #333;">
-                            <p>The interview has been successfully scheduled.</p>
-                            <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
-                                <tr>
-                                    <td style="padding: 10px 0; border-bottom: 1px solid #eee; font-weight: bold; width: 30%;">Candidate</td>
-                                    <td style="padding: 10px 0; border-bottom: 1px solid #eee;">${appData.name}</td>
-                                </tr>
-                                <tr>
-                                    <td style="padding: 10px 0; border-bottom: 1px solid #eee; font-weight: bold;">Position</td>
-                                    <td style="padding: 10px 0; border-bottom: 1px solid #eee;">${appData.job_title}</td>
-                                </tr>
-                                <tr>
-                                    <td style="padding: 10px 0; border-bottom: 1px solid #eee; font-weight: bold;">Time</td>
-                                    <td style="padding: 10px 0; border-bottom: 1px solid #eee;">${dateString}</td>
-                                </tr>
-                                <tr>
-                                    <td style="padding: 10px 0; border-bottom: 1px solid #eee; font-weight: bold;">Location</td>
-                                    <td style="padding: 10px 0; border-bottom: 1px solid #eee;">
-                                        ${isOnsite ? locationText : (meetingLink ? `<a href="${meetingLink}">Join Teams Meeting</a>` : 'Microsoft Teams Meeting')}
-                                    </td>
-                                </tr>
-                            </table>
-                            ${meetingLink ? `
-                            <div style="margin: 30px 0; text-align: center;">
-                                <a href="${meetingLink}" style="background-color: #5b5fc7; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">
-                                    Join Teams Meeting
-                                </a>
-                            </div>
-                            ` : ''}
-                            <p style="color: #666; font-size: 14px; margin-top: 30px;">
-                                A calendar invitation has been attached to this email. Please accept it to add this to your calendar.
-                            </p>
-                        </div>
-                        <div style="background-color: #f9fafb; padding: 20px; text-align: center; color: #999; font-size: 12px;">
-                            © Sunningdale Tech Ltd
-                        </div>
-                    </div>
+                    <!DOCTYPE html>
+                    <html lang="en">
+                    <head>
+                        <meta charset="UTF-8">
+                        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                        <title>Interview Confirmed</title>
+                    </head>
+                    <body style="margin: 0; padding: 0; background-color: #f5f7fa; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+                        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #f5f7fa; padding: 20px 0;">
+                            <tr>
+                                <td align="center">
+                                    <!-- Main Container -->
+                                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width: 600px; background-color: #ffffff; border-radius: 16px;">
+                                        
+                                        <!-- Header with Gradient -->
+                                        <tr>
+                                            <td style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); background-color: #667eea; padding: 40px 30px; text-align: center; border-radius: 16px 16px 0 0;">
+                                                <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+                                                    <tr>
+                                                        <td align="center">
+                                                            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="80" height="80" style="background-color: rgba(255, 255, 255, 0.2); border-radius: 50%; margin: 0 auto 20px;">
+                                                                <tr>
+                                                                    <td align="center" valign="middle" style="font-size: 40px; line-height: 80px;">✓</td>
+                                                                </tr>
+                                                            </table>
+                                                        </td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td align="center">
+                                                            <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 700;">Interview Confirmed!</h1>
+                                                        </td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td align="center">
+                                                            <p style="margin: 10px 0 0; color: rgba(255, 255, 255, 0.9); font-size: 16px;">Your interview has been successfully scheduled</p>
+                                                        </td>
+                                                    </tr>
+                                                </table>
+                                            </td>
+                                        </tr>
+                                        
+                                        <!-- Content Section -->
+                                        <tr>
+                                            <td style="padding: 40px 30px;">
+                                                <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+                                                    <tr>
+                                                        <td>
+                                                            <p style="margin: 0 0 30px; color: #4a5568; font-size: 16px; line-height: 1.6;">
+                                                                Hello <strong style="color: #2d3748;">${appData.name}</strong>,<br><br>
+                                                                We're excited to meet with you! Your interview for the <strong style="color: #667eea;">${appData.job_title}</strong> position has been confirmed.
+                                                            </p>
+                                                        </td>
+                                                    </tr>
+                                                    
+                                                    <!-- Interview Details Card -->
+                                                    <tr>
+                                                        <td>
+                                                            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #f7fafc; border-radius: 12px; border-left: 4px solid #667eea;">
+                                                                <tr>
+                                                                    <td style="padding: 24px;">
+                                                                        <!-- Candidate -->
+                                                                        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom: 12px;">
+                                                                            <tr>
+                                                                                <td width="32" valign="top">
+                                                                                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="32" height="32" style="background-color: #667eea; border-radius: 8px;">
+                                                                                        <tr>
+                                                                                            <td align="center" valign="middle" style="color: white; font-size: 18px; line-height: 32px;">👤</td>
+                                                                                        </tr>
+                                                                                    </table>
+                                                                                </td>
+                                                                                <td width="12"></td>
+                                                                                <td valign="middle">
+                                                                                    <div style="color: #718096; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">CANDIDATE</div>
+                                                                                    <div style="color: #2d3748; font-size: 16px; font-weight: 600;">${appData.name}</div>
+                                                                                </td>
+                                                                            </tr>
+                                                                        </table>
+                                                                        
+                                                                        <!-- Position -->
+                                                                        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom: 12px;">
+                                                                            <tr>
+                                                                                <td width="32" valign="top">
+                                                                                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="32" height="32" style="background-color: #48bb78; border-radius: 8px;">
+                                                                                        <tr>
+                                                                                            <td align="center" valign="middle" style="color: white; font-size: 18px; line-height: 32px;">💼</td>
+                                                                                        </tr>
+                                                                                    </table>
+                                                                                </td>
+                                                                                <td width="12"></td>
+                                                                                <td valign="middle">
+                                                                                    <div style="color: #718096; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">POSITION</div>
+                                                                                    <div style="color: #2d3748; font-size: 16px; font-weight: 600;">${appData.job_title}</div>
+                                                                                </td>
+                                                                            </tr>
+                                                                        </table>
+                                                                        
+                                                                        <!-- Date & Time -->
+                                                                        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom: 12px;">
+                                                                            <tr>
+                                                                                <td width="32" valign="top">
+                                                                                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="32" height="32" style="background-color: #ed8936; border-radius: 8px;">
+                                                                                        <tr>
+                                                                                            <td align="center" valign="middle" style="color: white; font-size: 18px; line-height: 32px;">📅</td>
+                                                                                        </tr>
+                                                                                    </table>
+                                                                                </td>
+                                                                                <td width="12"></td>
+                                                                                <td valign="middle">
+                                                                                    <div style="color: #718096; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">DATE & TIME</div>
+                                                                                    <div style="color: #2d3748; font-size: 16px; font-weight: 600;">${dateString}</div>
+                                                                                </td>
+                                                                            </tr>
+                                                                        </table>
+                                                                        
+                                                                        <!-- Location -->
+                                                                        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+                                                                            <tr>
+                                                                                <td width="32" valign="top">
+                                                                                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="32" height="32" style="background-color: #4299e1; border-radius: 8px;">
+                                                                                        <tr>
+                                                                                            <td align="center" valign="middle" style="color: white; font-size: 18px; line-height: 32px;">${isOnsite ? '📍' : '💻'}</td>
+                                                                                        </tr>
+                                                                                    </table>
+                                                                                </td>
+                                                                                <td width="12"></td>
+                                                                                <td valign="middle">
+                                                                                    <div style="color: #718096; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">LOCATION</div>
+                                                                                    <div style="color: #2d3748; font-size: 16px; font-weight: 600;">${isOnsite ? locationText : 'Microsoft Teams Meeting'}</div>
+                                                                                </td>
+                                                                            </tr>
+                                                                        </table>
+                                                                    </td>
+                                                                </tr>
+                                                            </table>
+                                                        </td>
+                                                    </tr>
+                                                    
+                                                    ${meetingLink ? `
+                                                    <!-- Teams Meeting Button -->
+                                                    <tr>
+                                                        <td align="center" style="padding: 30px 0;">
+                                                            <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                                                                <tr>
+                                                                    <td align="center" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); background-color: #667eea; border-radius: 8px;">
+                                                                        <a href="${meetingLink}" style="display: block; color: #ffffff; padding: 16px 40px; text-decoration: none; font-weight: 600; font-size: 16px;">
+                                                                            🎥 Join Teams Meeting
+                                                                        </a>
+                                                                    </td>
+                                                                </tr>
+                                                            </table>
+                                                        </td>
+                                                    </tr>
+                                                    ` : ''}
+                                                    
+                                                    <!-- Calendar Reminder -->
+                                                    <tr>
+                                                        <td style="padding-top: 30px;">
+                                                            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #edf2f7; border-radius: 8px; border-left: 3px solid #4299e1;">
+                                                                <tr>
+                                                                    <td style="padding: 16px;">
+                                                                        <p style="margin: 0; color: #4a5568; font-size: 14px; line-height: 1.6;">
+                                                                            <strong style="color: #2d3748;">📎 Calendar Invitation Attached</strong><br>
+                                                                            A calendar invitation (.ics file) has been attached to this email. Please accept it to automatically add this interview to your calendar.
+                                                                        </p>
+                                                                    </td>
+                                                                </tr>
+                                                            </table>
+                                                        </td>
+                                                    </tr>
+                                                    
+                                                    <!-- Tips Section -->
+                                                    <tr>
+                                                        <td style="padding-top: 30px; border-top: 1px solid #e2e8f0;">
+                                                            <p style="margin: 0 0 12px; color: #2d3748; font-size: 15px; font-weight: 600;">Interview Tips:</p>
+                                                            <ul style="margin: 0; padding-left: 20px; color: #4a5568; font-size: 14px; line-height: 1.8;">
+                                                                <li>Join the meeting 5 minutes early to test your connection</li>
+                                                                <li>Ensure you're in a quiet environment with good lighting</li>
+                                                                <li>Have a copy of your resume and any questions ready</li>
+                                                            </ul>
+                                                        </td>
+                                                    </tr>
+                                                </table>
+                                            </td>
+                                        </tr>
+                                        
+                                        <!-- Footer -->
+                                        <tr>
+                                            <td style="background-color: #2d3748; padding: 30px; text-align: center; border-radius: 0 0 16px 16px;">
+                                                <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+                                                    <tr>
+                                                        <td align="center">
+                                                            <p style="margin: 0 0 8px; color: #ffffff; font-size: 16px; font-weight: 600;">Sunningdale Tech Ltd</p>
+                                                        </td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td align="center">
+                                                            <p style="margin: 0; color: #a0aec0; font-size: 13px;">We're looking forward to speaking with you!</p>
+                                                        </td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td align="center" style="padding-top: 20px; border-top: 1px solid #4a5568;">
+                                                            <p style="margin: 0; color: #718096; font-size: 12px;">© ${new Date().getFullYear()} Sunningdale Tech Ltd. All rights reserved.</p>
+                                                        </td>
+                                                    </tr>
+                                                </table>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                </td>
+                            </tr>
+                        </table>
+                    </body>
+                    </html>
                 `,
                 icalEvent: {
                     filename: 'interview.ics',
@@ -2785,6 +2780,183 @@ A calendar invitation is attached to this email.
     }
 });
 
+// ============================================
+// RESUME SIGNED URL ENDPOINT
+// ============================================
+
+// Generate signed URL for resume viewing
+app.post('/api/resume-url', async (req, res) => {
+    try {
+        const { resumePath } = req.body;
+
+        if (!resumePath) {
+            return res.status(400).json({ error: 'Resume path is required' });
+        }
+
+        console.log('[Resume URL] Generating signed URL for:', resumePath);
+
+        // Create signed URL with inline content disposition for browser preview
+        const { data, error } = await supabase.storage
+            .from('resumes')
+            .createSignedUrl(resumePath, 3600, {
+                download: false // This sets Content-Disposition to 'inline' instead of 'attachment'
+            });
+
+        if (error) {
+            console.error('[Resume URL] Error:', error);
+            return res.status(404).json({ error: 'Resume not found' });
+        }
+
+        console.log('[Resume URL] Success (inline preview):', data.signedUrl);
+        res.json({ signedUrl: data.signedUrl });
+    } catch (error) {
+        console.error('[Resume URL] Exception:', error);
+        res.status(500).json({ error: 'Failed to generate signed URL' });
+    }
+});
+
+// Schedule Interview - Create interview slots for a candidate
+app.post('/api/schedule-interview', async (req, res) => {
+    try {
+        const { applicationId, slots, message } = req.body;
+
+        if (!applicationId || !slots || !Array.isArray(slots) || slots.length === 0) {
+            return res.status(400).json({ error: 'Application ID and slots are required' });
+        }
+
+        console.log(`[Schedule Interview] Creating ${slots.length} slots for application ${applicationId}`);
+
+        // Get application details
+        const { data: application, error: appError } = await supabase
+            .from('applications')
+            .select('name, email, job_title')
+            .eq('id', applicationId)
+            .single();
+
+        if (appError || !application) {
+            console.error('[Schedule Interview] Application not found:', appError);
+            return res.status(404).json({ error: 'Application not found' });
+        }
+
+        // Create interview slots in database
+        const createdSlots = [];
+        for (const slot of slots) {
+            const { data, error } = await supabase
+                .from('interview_slots')
+                .insert({
+                    start_time: slot.startTime,
+                    end_time: slot.endTime,
+                    status: 'open',
+                    type: slot.type || 'online',
+                    room_id: slot.room?.id || null,
+                    application_id: applicationId  // Link slot to specific candidate
+                })
+                .select()
+                .single();
+
+            if (error) {
+                console.error('[Schedule Interview] Error creating slot:', error);
+                throw error;
+            }
+
+            createdSlots.push(data);
+            console.log(`[Schedule Interview] Created slot: ${data.id} for ${slot.startTime}`);
+        }
+
+        // Generate booking URL
+        const bookingUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/interview-booking/${applicationId}`;
+
+        // Send email to candidate
+        const emailHtml = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                    .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+                    .content { background: #f9fafb; padding: 30px; border-radius: 0 0 10px 10px; }
+                    .button { display: inline-block; background: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; margin: 20px 0; }
+                    .slot { background: white; padding: 15px; margin: 10px 0; border-left: 4px solid #667eea; border-radius: 4px; }
+                    .footer { text-align: center; margin-top: 20px; color: #666; font-size: 12px; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <h1>Interview Invitation</h1>
+                    </div>
+                    <div class="content">
+                        <p>Dear ${application.name},</p>
+                        <p>${message || 'We have reviewed your application and would like to invite you for an interview.'}</p>
+                        <p><strong>Position:</strong> ${application.job_title}</p>
+                        
+                        <p>We have prepared the following time slots for you. Please select the one that works best for your schedule:</p>
+                        
+                        ${slots.map(slot => `
+                            <div class="slot">
+                                <strong>${new Date(slot.startTime).toLocaleDateString('en-SG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</strong><br>
+                                ${new Date(slot.startTime).toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit' })} - 
+                                ${new Date(slot.endTime).toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit' })}<br>
+                                <em>${slot.type === 'online' ? '📹 Online Meeting' : `📍 Onsite - ${slot.room?.name || 'TBD'}`}</em>
+                            </div>
+                        `).join('')}
+                        
+                        <p style="text-align: center;">
+                            <a href="${bookingUrl}" class="button">Select Your Interview Time</a>
+                        </p>
+                        
+                        <p>Please book your preferred slot as soon as possible. If none of these times work for you, please reply to this email.</p>
+                        
+                        <p>We look forward to meeting you!</p>
+                        
+                        <p>Best regards,<br>Sunningdale Tech Recruitment Team</p>
+                    </div>
+                    <div class="footer">
+                        <p>This is an automated email. Please do not reply directly to this message.</p>
+                    </div>
+                </div>
+            </body>
+            </html>
+        `;
+
+        // Send email using nodemailer
+        if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+            const nodemailer = require('nodemailer');
+            const transporter = nodemailer.createTransporter({
+                service: 'gmail',
+                auth: {
+                    user: process.env.EMAIL_USER,
+                    pass: process.env.EMAIL_PASS
+                }
+            });
+
+            await transporter.sendMail({
+                from: `"Sunningdale Tech Recruitment" <${process.env.EMAIL_USER}>`,
+                to: application.email,
+                subject: `Interview Invitation - ${application.job_title}`,
+                html: emailHtml
+            });
+
+            console.log(`[Schedule Interview] Email sent to ${application.email}`);
+        } else {
+            console.warn('[Schedule Interview] Email not configured, skipping email send');
+        }
+
+        res.json({
+            success: true,
+            slotsCreated: createdSlots.length,
+            bookingUrl: bookingUrl
+        });
+
+    } catch (error) {
+        console.error('[Schedule Interview] Error:', error);
+        res.status(500).json({ error: 'Failed to schedule interview' });
+    }
+});
+
+
+
 // Serve static files from the 'dist' directory
 // Serve static files from the 'dist' directory ONLY in production
 if (process.env.NODE_ENV === 'production') {
@@ -2798,4 +2970,48 @@ if (process.env.NODE_ENV === 'production') {
 
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
+
+    // Schedule a job to run daily to delete archived applications older than 1 year
+    setInterval(async () => {
+        try {
+            console.log('[Cleanup Job] Running daily cleanup of archived applications...');
+            const oneYearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
+
+            const { data: oldApps, error: fetchError } = await supabase
+                .from('applications')
+                .select('id, resume_url')
+                .eq('status', 'archived')
+                .lt('archived_at', oneYearAgo);
+
+            if (fetchError) throw fetchError;
+
+            if (oldApps && oldApps.length > 0) {
+                console.log(`[Cleanup Job] Found ${oldApps.length} applications to permanently delete.`);
+
+                // Delete resumes
+                const resumesToRemove = oldApps.map(app => app.resume_url).filter(Boolean);
+                if (resumesToRemove.length > 0) {
+                    const { error: storageError } = await supabase.storage
+                        .from('resumes')
+                        .remove(resumesToRemove);
+                    if (storageError) console.error('[Cleanup Job] Error deleting resumes:', storageError);
+                }
+
+                // Delete records
+                const appIds = oldApps.map(app => app.id);
+                const { error: deleteError } = await supabase
+                    .from('applications')
+                    .delete()
+                    .in('id', appIds);
+
+                if (deleteError) throw deleteError;
+
+                console.log(`[Cleanup Job] Successfully deleted ${oldApps.length} archived applications.`);
+            } else {
+                console.log('[Cleanup Job] No archived applications require permanent deletion today.');
+            }
+        } catch (error) {
+            console.error('[Cleanup Job] Error during cleanup:', error);
+        }
+    }, 24 * 60 * 60 * 1000); // Run every 24 hours
 });
