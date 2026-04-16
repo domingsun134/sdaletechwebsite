@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import HeroSection from '../components/HeroSection';
-import { FileText, Users, Shield, Zap, Award, Globe, Lock, TrendingUp, Smile, Leaf, Scale, Megaphone, Handshake, GraduationCap, ChevronDown, ChevronUp } from 'lucide-react';
+import { FileText, Users, Shield, Zap, Award, Globe, Lock, TrendingUp, Smile, Leaf, Scale, Megaphone, Handshake, GraduationCap, ChevronDown, ChevronUp, Download } from 'lucide-react';
 
 const SustainabilitySection = ({ icon: Icon, title, children, defaultOpen = false }) => {
     const [isOpen, setIsOpen] = useState(defaultOpen);
@@ -47,6 +47,17 @@ const Sustainability = () => {
                     <p className="mt-8 text-slate-600">
                         Our financial and operational objectives are aligned towards constantly improving upon our sustainability performance through regular monitoring and effective reporting channels. This policy will be communicated to our stakeholders, i.e. shareholders, business partners, suppliers, customers and our employees. It will also be made available to the public.
                     </p>
+                    <div className="mt-6 flex justify-center">
+                        <a
+                            href="/Sunningdale SR 2024_V04.pdf"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-2 px-6 py-3 bg-primary text-white font-semibold rounded-lg hover:bg-primary/90 transition-colors shadow-md hover:shadow-lg"
+                        >
+                            <Download size={20} />
+                            Download 2024 Sustainability Report
+                        </a>
+                    </div>
                 </section>
 
                 {/* Unified CSR Section */}

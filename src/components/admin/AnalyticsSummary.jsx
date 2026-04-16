@@ -1,97 +1,213 @@
-import React from 'react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
-import { Users, Eye, MousePointer, Clock } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+    PieChart, Pie, Cell, Legend
+} from 'recharts';
+import { Eye, Users, Monitor, FileText, RefreshCw, TrendingUp } from 'lucide-react';
+
+const DEVICE_COLORS = {
+    Desktop: '#6366f1',
+    Mobile:  '#06b6d4',
+    Tablet:  '#f59e0b',
+    Unknown: '#94a3b8',
+};
+
+const RANGES = [
+    { label: '7 days',  value: 7 },
+    { label: '30 days', value: 30 },
+    { label: '90 days', value: 90 },
+];
+
+const fmtDate = (iso) => {
+    const d = new Date(iso);
+    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+};
+
+const StatCard = ({ icon: Icon, label, value, sub, color }) => (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 flex items-start gap-4">
+        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${color}`}>
+            <Icon size={20} className="text-white" />
+        </div>
+        <div>
+            <p className="text-xs text-slate-500 font-medium">{label}</p>
+            <p className="text-2xl font-bold text-slate-800 mt-0.5">{value}</p>
+            {sub && <p className="text-xs text-slate-400 mt-0.5">{sub}</p>}
+        </div>
+    </div>
+);
 
 const AnalyticsSummary = () => {
-    // Mock Data
-    const visitorData = [
-        { name: 'Mon', visitors: 4000, pageviews: 2400 },
-        { name: 'Tue', visitors: 3000, pageviews: 1398 },
-        { name: 'Wed', visitors: 2000, pageviews: 9800 },
-        { name: 'Thu', visitors: 2780, pageviews: 3908 },
-        { name: 'Fri', visitors: 1890, pageviews: 4800 },
-        { name: 'Sat', visitors: 2390, pageviews: 3800 },
-        { name: 'Sun', visitors: 3490, pageviews: 4300 },
-    ];
+    const [days, setDays] = useState(30);
+    const [data, setData] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
 
-    const deviceData = [
-        { name: 'Desktop', value: 65 },
-        { name: 'Mobile', value: 25 },
-        { name: 'Tablet', value: 10 },
-    ];
+    const fetchData = useCallback(async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            const res = await fetch(`/api/analytics/page-views?days=${days}`, {
+                headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+            });
+            if (!res.ok) throw new Error(`Server error ${res.status}`);
+            setData(await res.json());
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setLoading(false);
+        }
+    }, [days]);
 
-    const stats = [
-        { title: 'Total Visitors', value: '12,345', change: '+12%', icon: <Users className="text-blue-500" size={24} />, bg: 'bg-blue-50' },
-        { title: 'Page Views', value: '45,678', change: '+8%', icon: <Eye className="text-green-500" size={24} />, bg: 'bg-green-50' },
-        { title: 'Bounce Rate', value: '42.3%', change: '-2%', icon: <MousePointer className="text-purple-500" size={24} />, bg: 'bg-purple-50' },
-        { title: 'Avg. Session', value: '2m 45s', change: '+5%', icon: <Clock className="text-orange-500" size={24} />, bg: 'bg-orange-50' },
-    ];
+    useEffect(() => { fetchData(); }, [fetchData]);
+
+    const avgPerDay = data ? (data.totalViews / days).toFixed(1) : '—';
+    const topDevice = data?.deviceBreakdown?.[0]?.device ?? '—';
 
     return (
-        <div className="space-y-8 animate-in fade-in duration-500">
-            {/* Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                {stats.map((stat, index) => (
-                    <div key={index} className="bg-white p-6 rounded-xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
-                        <div className="flex justify-between items-start mb-4">
-                            <div className={`p-3 rounded-xl ${stat.bg}`}>
-                                {stat.icon}
-                            </div>
-                            <span className={`text-xs font-medium px-2 py-1 rounded-full ${stat.change.startsWith('+') ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                {stat.change}
-                            </span>
-                        </div>
-                        <h3 className="text-slate-500 text-sm font-medium mb-1">{stat.title}</h3>
-                        <p className="text-2xl font-bold text-slate-800">{stat.value}</p>
-                    </div>
-                ))}
+        <div className="space-y-6">
+            {/* Controls */}
+            <div className="flex items-center justify-between flex-wrap gap-3">
+                <div className="flex gap-1 bg-slate-100 p-1 rounded-xl">
+                    {RANGES.map(r => (
+                        <button
+                            key={r.value}
+                            onClick={() => setDays(r.value)}
+                            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                                days === r.value
+                                    ? 'bg-white text-slate-800 shadow-sm'
+                                    : 'text-slate-500 hover:text-slate-700'
+                            }`}
+                        >
+                            {r.label}
+                        </button>
+                    ))}
+                </div>
+                <button
+                    onClick={fetchData}
+                    disabled={loading}
+                    className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition-colors disabled:opacity-50"
+                >
+                    <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+                    {loading ? 'Loading…' : 'Refresh'}
+                </button>
             </div>
 
-            {/* Charts */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* Main Traffic Chart */}
-                <div className="lg:col-span-2 bg-white p-6 rounded-xl border border-slate-100 shadow-sm">
-                    <h3 className="text-lg font-bold text-slate-800 mb-6">Traffic Overview</h3>
-                    <div className="h-[300px] w-full">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart data={visitorData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                                <defs>
-                                    <linearGradient id="colorVisitors" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.1} />
-                                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                                    </linearGradient>
-                                    <linearGradient id="colorPageviews" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.1} />
-                                        <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                                    </linearGradient>
-                                </defs>
-                                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8' }} />
-                                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8' }} />
-                                <CartesianGrid vertical={false} stroke="#f1f5f9" />
-                                <Tooltip
-                                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                />
-                                <Area type="monotone" dataKey="visitors" stroke="#3b82f6" strokeWidth={2} fillOpacity={1} fill="url(#colorVisitors)" />
-                                <Area type="monotone" dataKey="pageviews" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorPageviews)" />
-                            </AreaChart>
-                        </ResponsiveContainer>
-                    </div>
-                </div>
+            {error && (
+                <div className="bg-red-50 border border-red-100 text-red-700 rounded-xl p-4 text-sm">{error}</div>
+            )}
 
-                {/* Device Stats */}
-                <div className="bg-white p-6 rounded-xl border border-slate-100 shadow-sm">
-                    <h3 className="text-lg font-bold text-slate-800 mb-6">Device Usage</h3>
-                    <div className="h-[300px] w-full">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={deviceData} layout="vertical" margin={{ top: 0, right: 30, left: 20, bottom: 0 }}>
-                                <XAxis type="number" hide />
-                                <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} width={80} tick={{ fill: '#64748b' }} />
-                                <Tooltip cursor={{ fill: 'transparent' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                                <Bar dataKey="value" fill="#6366f1" radius={[0, 4, 4, 0]} barSize={32} />
+            {/* KPI Cards */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <StatCard icon={Eye}       label="Total Page Views"  value={loading ? '…' : data?.totalViews.toLocaleString()}    sub={`Last ${days} days`}       color="bg-indigo-500" />
+                <StatCard icon={Users}     label="Unique Sessions"   value={loading ? '…' : data?.uniqueSessions.toLocaleString()} sub="Anonymous sessions"        color="bg-cyan-500"   />
+                <StatCard icon={TrendingUp} label="Avg Views / Day"  value={loading ? '…' : avgPerDay}                             sub="Over selected period"      color="bg-violet-500" />
+                <StatCard icon={Monitor}   label="Top Device"        value={loading ? '…' : topDevice}                             sub="Most common device type"   color="bg-amber-500"  />
+            </div>
+
+            {/* Charts row */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Views over time */}
+                <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+                    <h2 className="font-semibold text-slate-700 mb-4 flex items-center gap-2">
+                        <TrendingUp size={16} className="text-indigo-500" />
+                        Page Views Over Time
+                    </h2>
+                    {loading ? (
+                        <div className="h-56 flex items-center justify-center text-slate-400 text-sm">Loading…</div>
+                    ) : (
+                        <ResponsiveContainer width="100%" height={220}>
+                            <BarChart data={data?.viewsByDay} barCategoryGap="30%">
+                                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                                <XAxis
+                                    dataKey="date"
+                                    tickFormatter={fmtDate}
+                                    tick={{ fontSize: 11, fill: '#94a3b8' }}
+                                    interval={Math.floor((data?.viewsByDay?.length || 1) / 6)}
+                                    axisLine={false}
+                                    tickLine={false}
+                                />
+                                <YAxis
+                                    tick={{ fontSize: 11, fill: '#94a3b8' }}
+                                    axisLine={false}
+                                    tickLine={false}
+                                    allowDecimals={false}
+                                />
+                                <Tooltip
+                                    labelFormatter={fmtDate}
+                                    formatter={(v) => [v, 'Views']}
+                                    contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12 }}
+                                />
+                                <Bar dataKey="views" fill="#6366f1" radius={[4, 4, 0, 0]} />
                             </BarChart>
                         </ResponsiveContainer>
-                    </div>
+                    )}
                 </div>
+
+                {/* Device breakdown */}
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+                    <h2 className="font-semibold text-slate-700 mb-4 flex items-center gap-2">
+                        <Monitor size={16} className="text-cyan-500" />
+                        Device Breakdown
+                    </h2>
+                    {loading ? (
+                        <div className="h-56 flex items-center justify-center text-slate-400 text-sm">Loading…</div>
+                    ) : !data?.deviceBreakdown?.length ? (
+                        <div className="h-56 flex items-center justify-center text-slate-400 text-sm">No data</div>
+                    ) : (
+                        <ResponsiveContainer width="100%" height={220}>
+                            <PieChart>
+                                <Pie
+                                    data={data.deviceBreakdown}
+                                    dataKey="count"
+                                    nameKey="device"
+                                    cx="50%" cy="45%"
+                                    outerRadius={75}
+                                    label={({ device, percent }) => `${device} ${(percent * 100).toFixed(0)}%`}
+                                    labelLine={false}
+                                >
+                                    {data.deviceBreakdown.map((entry) => (
+                                        <Cell key={entry.device} fill={DEVICE_COLORS[entry.device] || '#94a3b8'} />
+                                    ))}
+                                </Pie>
+                                <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
+                                <Tooltip formatter={(v, name) => [v, name]} contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12 }} />
+                            </PieChart>
+                        </ResponsiveContainer>
+                    )}
+                </div>
+            </div>
+
+            {/* Top Pages */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
+                <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-2">
+                    <FileText size={16} className="text-violet-500" />
+                    <h2 className="font-semibold text-slate-700">Top Pages</h2>
+                    <span className="ml-auto text-xs text-slate-400">Last {days} days</span>
+                </div>
+                {loading ? (
+                    <div className="p-6 text-center text-slate-400 text-sm">Loading…</div>
+                ) : !data?.topPages?.length ? (
+                    <div className="p-6 text-center text-slate-400 text-sm">No page view data recorded yet.</div>
+                ) : (
+                    <div className="divide-y divide-slate-50">
+                        {data.topPages.map((row, i) => {
+                            const maxViews = data.topPages[0].views;
+                            const pct = Math.round((row.views / maxViews) * 100);
+                            return (
+                                <div key={row.path} className="px-6 py-3 flex items-center gap-4">
+                                    <span className="text-xs text-slate-400 w-5 text-right shrink-0">{i + 1}</span>
+                                    <span className="text-sm text-slate-700 font-mono truncate flex-1">{row.path}</span>
+                                    <div className="w-32 bg-slate-100 rounded-full h-1.5 shrink-0">
+                                        <div className="bg-indigo-500 h-1.5 rounded-full" style={{ width: `${pct}%` }} />
+                                    </div>
+                                    <span className="text-sm font-semibold text-slate-700 w-12 text-right shrink-0">
+                                        {row.views.toLocaleString()}
+                                    </span>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
             </div>
         </div>
     );

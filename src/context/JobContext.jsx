@@ -20,6 +20,7 @@ export const JobProvider = ({ children }) => {
             const { data, error } = await supabase
                 .from('jobs')
                 .select('*')
+                .neq('is_deleted', true) // Filter out softly deleted jobs
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
@@ -120,9 +121,10 @@ export const JobProvider = ({ children }) => {
 
     const deleteJob = async (id) => {
         try {
+            // Soft delete: set is_deleted = true instead of deleting the row
             const { error } = await supabase
                 .from('jobs')
-                .delete()
+                .update({ is_deleted: true })
                 .eq('id', id);
 
             if (error) throw error;

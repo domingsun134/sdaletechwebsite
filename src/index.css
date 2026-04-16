@@ -86,6 +86,35 @@
 }
 
 @layer components {
+  /* Rich text editor contenteditable styles */
+  .rich-editor-content:empty:before {
+    content: attr(data-placeholder);
+    color: #94a3b8;
+    pointer-events: none;
+  }
+
+  .rich-editor-content ul {
+    list-style-type: disc;
+    padding-left: 1.25rem;
+    margin: 0.25rem 0;
+  }
+
+  .rich-editor-content li {
+    margin-bottom: 0.2rem;
+  }
+
+  /* Rendered job content in career portal */
+  .job-rich-content ul {
+    list-style-type: disc;
+    padding-left: 1.25rem;
+    margin: 0.25rem 0;
+  }
+
+  .job-rich-content li {
+    margin-bottom: 0.25rem;
+    color: #475569;
+  }
+
   .container-custom {
     @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
   }

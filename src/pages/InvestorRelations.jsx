@@ -58,7 +58,7 @@ const InvestorRelations = () => {
                 <section className="max-w-4xl mx-auto">
                     <div className="flex items-center justify-between mb-8">
                         <h2 className="text-3xl font-bold text-slate-900">Latest News</h2>
-                        <a href="https://investor.sdaletech.com/newsroom.html" target="_blank" rel="noopener noreferrer" className="text-primary font-medium hover:underline">See all news</a>
+                        {import.meta.env.DEV && <a href="https://investor.sdaletech.com/newsroom.html" target="_blank" rel="noopener noreferrer" className="text-primary font-medium hover:underline">See all news</a>}
                     </div>
 
                     <div className="space-y-6">

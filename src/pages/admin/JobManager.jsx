@@ -14,6 +14,7 @@ import OnboardingDetailsModal from '../../components/admin/OnboardingDetailsModa
 import ScheduleInterviewModal from '../../components/admin/ScheduleInterviewModal';
 import Dashboard from '../../components/admin/Dashboard';
 import OffboardingManager from '../../components/admin/OffboardingManager';
+import RichTextEditor from '../../components/admin/RichTextEditor';
 import { supabase } from '../../lib/supabase';
 import { isFuzzyMatch } from '../../utils/stringUtils';
 
@@ -37,6 +38,7 @@ const JobManager = () => {
     const [currentAnalysis, setCurrentAnalysis] = useState(null);
     const [analyzingIds, setAnalyzingIds] = useState(new Set());
     const [searchTerm, setSearchTerm] = useState('');
+    const [locationOptions, setLocationOptions] = useState([]);
     // Filter States for Jobs
     const [selectedLocation, setSelectedLocation] = useState('All');
     const [selectedCompany, setSelectedCompany] = useState('All');
@@ -66,6 +68,18 @@ const JobManager = () => {
 
     const location = useLocation();
 
+    // Fetch locations from DB
+    useEffect(() => {
+        supabase
+            .from('job_locations')
+            .select('name')
+            .eq('is_active', true)
+            .order('sort_order', { ascending: true })
+            .then(({ data }) => {
+                if (data) setLocationOptions(data.map(r => r.name));
+            });
+    }, []);
+
     // Parse tab from URL on mount/update
     useEffect(() => {
         const params = new URLSearchParams(location.search);
@@ -82,6 +96,7 @@ const JobManager = () => {
                 const { data, error } = await supabase
                     .from('applications')
                     .select('*')
+                    .neq('is_deleted', true) // Filter out softly deleted applications
                     .order('created_at', { ascending: false });
 
                 if (error) throw error;
@@ -424,9 +439,35 @@ const JobManager = () => {
             type: 'confirm',
             title: 'Delete Job',
             message: 'Are you sure you want to delete this job? This action cannot be undone.',
-            onConfirm: () => {
-                deleteJob(id);
-                setStatusModal(prev => ({ ...prev, isOpen: false }));
+            onConfirm: async () => {
+                setStatusModal(prev => ({ ...prev, isLoading: true }));
+                try {
+                    await deleteJob(id);
+                    setStatusModal({
+                        isOpen: true,
+                        type: 'success',
+                        title: 'Job Deleted',
+                        message: 'The job has been successfully deleted.',
+                        onConfirm: null,
+                        isLoading: false
+                    });
+                } catch (error) {
+                    console.error('Error deleting job:', error);
+                    let errorMessage = 'Failed to delete job. Please try again.';
+
+                    if (error?.code === '23503' || error?.message?.includes('409') || error?.details?.includes('is still referenced')) {
+                        errorMessage = 'Cannot delete this job because there are candidates applying to it. Please archive or delete the candidates first.';
+                    }
+
+                    setStatusModal({
+                        isOpen: true,
+                        type: 'error',
+                        title: 'Cannot Delete Job',
+                        message: errorMessage,
+                        onConfirm: null,
+                        isLoading: false
+                    });
+                }
             }
         });
     };
@@ -756,10 +797,11 @@ const JobManager = () => {
                 .from('onboarding_submissions')
                 .select('*')
                 .eq('application_id', applicationId)
-                .single();
+                .order('created_at', { ascending: false })
+                .limit(1);
 
             if (error) throw error;
-            setSelectedOnboardingSubmission(data);
+            setSelectedOnboardingSubmission(data?.[0] ?? null);
         } catch (error) {
             console.error('Error fetching onboarding details:', error);
             // Optionally show error toast
@@ -1026,6 +1068,7 @@ const JobManager = () => {
                                         <th className="px-6 py-4 font-semibold text-slate-700">{t('type')}</th>
                                         <th className="px-6 py-4 font-semibold text-slate-700">{t('status')}</th>
                                         <th className="px-6 py-4 font-semibold text-slate-700">{t('applications')}</th>
+                                        <th className="px-6 py-4 font-semibold text-slate-700">Posted By</th>
                                         <th className="px-6 py-4 font-semibold text-slate-700">{t('actions')}</th>
                                     </tr>
                                 </thead>
@@ -1072,6 +1115,13 @@ const JobManager = () => {
                                                         <Users size={16} className="text-slate-400" />
                                                         <span>{appCount} Applied</span>
                                                     </div>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    {job.createdBy ? (
+                                                        <div className="text-sm text-slate-600">{job.createdBy}</div>
+                                                    ) : (
+                                                        <span className="text-xs text-slate-400">—</span>
+                                                    )}
                                                 </td>
                                                 <td className="px-6 py-4">
                                                     <div className="flex gap-2">
@@ -1416,20 +1466,9 @@ const JobManager = () => {
                                             onChange={handleChange}
                                             className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all bg-white"
                                         >
-                                            <option value="Singapore">Singapore</option>
-                                            <option value="Johor, Malaysia">Johor, Malaysia</option>
-                                            <option value="Penang, Malaysia">Penang, Malaysia</option>
-                                            <option value="Shanghai, China">Shanghai, China</option>
-                                            <option value="Chuzhou, China">Chuzhou, China</option>
-                                            <option value="Guangzhou, China">Guangzhou, China</option>
-                                            <option value="Suzhou, China">Suzhou, China</option>
-                                            <option value="Tianjin, China">Tianjin, China</option>
-                                            <option value="Zhongshan, China">Zhongshan, China</option>
-                                            <option value="Batam, Indonesia">Batam, Indonesia</option>
-                                            <option value="Chennai, India">Chennai, India</option>
-                                            <option value="Rayong, Thailand">Rayong, Thailand</option>
-                                            <option value="Riga, Latvia">Riga, Latvia</option>
-                                            <option value="Guadalajara, Mexico">Guadalajara, Mexico</option>
+                                            {locationOptions.map(loc => (
+                                                <option key={loc} value={loc}>{loc}</option>
+                                            ))}
                                         </select>
                                     </div>
 
@@ -1533,39 +1572,34 @@ const JobManager = () => {
                                 {/* Job Highlights */}
                                 <div className="space-y-2">
                                     <label className="text-sm font-medium text-slate-700">Job Highlights (Optional) / 工作亮点</label>
-                                    <textarea
-                                        name="highlights"
+                                    <RichTextEditor
                                         value={formData.highlights}
-                                        onChange={handleChange}
-                                        rows="3"
-                                        className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all resize-none"
-                                    ></textarea>
+                                        onChange={(html) => setFormData(prev => ({ ...prev, highlights: html }))}
+                                        minHeight="5rem"
+                                        placeholder="Enter job highlights..."
+                                    />
                                 </div>
 
                                 {/* Responsibilities */}
                                 <div className="space-y-2">
                                     <label className="text-sm font-medium text-slate-700">Responsibilities / 职责</label>
-                                    <textarea
-                                        name="responsibilities"
+                                    <RichTextEditor
                                         value={formData.responsibilities}
-                                        onChange={handleChange}
-                                        required
-                                        rows="5"
-                                        className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all resize-none"
-                                    ></textarea>
+                                        onChange={(html) => setFormData(prev => ({ ...prev, responsibilities: html }))}
+                                        minHeight="8rem"
+                                        placeholder="Enter responsibilities..."
+                                    />
                                 </div>
 
                                 {/* Requirements */}
                                 <div className="space-y-2">
                                     <label className="text-sm font-medium text-slate-700">Requirements / 要求</label>
-                                    <textarea
-                                        name="requirements"
+                                    <RichTextEditor
                                         value={formData.requirements}
-                                        onChange={handleChange}
-                                        required
-                                        rows="5"
-                                        className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all resize-none"
-                                    ></textarea>
+                                        onChange={(html) => setFormData(prev => ({ ...prev, requirements: html }))}
+                                        minHeight="8rem"
+                                        placeholder="Enter requirements..."
+                                    />
                                 </div>
 
                                 {/* Career Level */}

@@ -101,7 +101,10 @@ const JobDetails = () => {
                                         Job Highlights
                                     </h3>
                                     <div className="bg-blue-50/50 p-6 rounded-xl border border-blue-100">
-                                        <p className="text-slate-700 whitespace-pre-line leading-relaxed">{job.highlights}</p>
+                                        <div
+                                            className="job-rich-content text-slate-700 leading-relaxed"
+                                            dangerouslySetInnerHTML={{ __html: job.highlights }}
+                                        />
                                     </div>
                                 </section>
                             )}
@@ -112,11 +115,10 @@ const JobDetails = () => {
                                         <div className="w-1 h-6 bg-primary rounded-full"></div>
                                         Responsibilities
                                     </h3>
-                                    <ul className="list-disc pl-5 space-y-2 text-slate-600 leading-relaxed">
-                                        {job.responsibilities.split('\n').filter(item => item.trim()).map((item, index) => (
-                                            <li key={index}>{item}</li>
-                                        ))}
-                                    </ul>
+                                    <div
+                                        className="job-rich-content text-slate-600 leading-relaxed space-y-1"
+                                        dangerouslySetInnerHTML={{ __html: job.responsibilities }}
+                                    />
                                 </section>
                             )}
 
@@ -126,11 +128,10 @@ const JobDetails = () => {
                                         <div className="w-1 h-6 bg-primary rounded-full"></div>
                                         Requirements
                                     </h3>
-                                    <ul className="list-disc pl-5 space-y-2 text-slate-600 leading-relaxed">
-                                        {job.requirements.split('\n').filter(item => item.trim()).map((item, index) => (
-                                            <li key={index}>{item}</li>
-                                        ))}
-                                    </ul>
+                                    <div
+                                        className="job-rich-content text-slate-600 leading-relaxed space-y-1"
+                                        dangerouslySetInnerHTML={{ __html: job.requirements }}
+                                    />
                                 </section>
                             )}
 

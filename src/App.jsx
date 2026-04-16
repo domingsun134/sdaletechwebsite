@@ -11,11 +11,17 @@ import Tooling from './pages/Tooling';
 import ToolingCapabilities from './pages/ToolingCapabilities';
 import Innovation from './pages/Innovation';
 import Capabilities from './pages/Capabilities';
-import PPE from './pages/PPE';
 import { About, Business, Careers } from './pages/OtherPages';
 import BoardOfDirectors from './pages/BoardOfDirectors';
 import Sustainability from './pages/Sustainability';
 import InvestorRelations from './pages/InvestorRelations';
+import InvestorLayout from './components/investor/InvestorLayout';
+import InvestorHome from './pages/investor/InvestorHome';
+import Newsroom from './pages/investor/Newsroom';
+import Financials from './pages/investor/Financials';
+import AnnualReports from './pages/investor/AnnualReports';
+import SustainabilityReports from './pages/investor/SustainabilityReports';
+import NewsDetail from './pages/investor/NewsDetail';
 import Contact from './pages/Contact';
 import Career from './pages/Career';
 import JobOpportunities from './pages/JobOpportunities';
@@ -35,6 +41,7 @@ import Analytics from './pages/admin/Analytics';
 import JobManager from './pages/admin/JobManager';
 import EventManager from './pages/admin/EventManager';
 import UserManager from './pages/admin/UserManager';
+import Settings from './pages/admin/Settings';
 import Events from './pages/Events';
 import InterviewBooking from './pages/InterviewBooking';
 import CandidateOnboarding from './pages/CandidateOnboarding';
@@ -93,6 +100,11 @@ function App() {
                     <UserManager />
                   </ProtectedRoute>
                 } />
+                <Route path="/admin/settings" element={
+                  <ProtectedRoute>
+                    <Settings />
+                  </ProtectedRoute>
+                } />
 
                 {/* Public Booking Route */}
                 <Route path="/schedule/:applicationId" element={<InterviewBooking />} />
@@ -112,7 +124,6 @@ function App() {
                   <Route path="business/healthcare" element={<Healthcare />} />
                   <Route path="business/tooling" element={<Tooling />} />
                   <Route path="capabilities/manufacturing" element={<ToolingCapabilities />} />
-                  <Route path="business/ppe" element={<PPE />} />
                   <Route path="capabilities" element={<Capabilities />} />
                   <Route path="capabilities/innovation" element={<Innovation />} />
                   <Route path="contact" element={<Contact />} />
@@ -121,8 +132,19 @@ function App() {
                   <Route path="careers/job-opportunities/:id" element={<JobDetails />} />
                   <Route path="careers/internships" element={<Internships />} />
                   <Route path="careers/talent-community" element={<TalentCommunity />} />
-                  <Route path="investor-relations" element={<InvestorRelations />} />
                   <Route path="*" element={<div className="p-20 text-center">Page Not Found</div>} />
+                </Route>
+
+                {/* Investor Relations Routes - Outside Layout for custom design */}
+                <Route path="/investor-relations" element={<InvestorLayout />}>
+                  <Route index element={<InvestorHome />} />
+                  <Route path="newsroom" element={<Newsroom />} />
+                  <Route path="news/:id" element={<NewsDetail />} />
+                  <Route path="financials" element={<Financials />} />
+                  <Route path="annual-reports" element={<AnnualReports />} />
+                  {import.meta.env.DEV && (
+                    <Route path="sustainability-reports" element={<SustainabilityReports />} />
+                  )}
                 </Route>
               </Routes>
             </EventProvider>

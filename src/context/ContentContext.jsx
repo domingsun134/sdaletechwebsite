@@ -20,7 +20,7 @@ export const ContentProvider = ({ children }) => {
                 title: "Global Footprint",
                 description: "With manufacturing facilities across Asia, South America, and Europe, we are positioned to serve our customers wherever they are.",
                 stats: [
-                    { label: "Manufacturing Sites", value: "18+" },
+                    { label: "Manufacturing Sites", value: "27" },
                     { label: "Countries", value: "9" }
                 ]
             }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { Save, Plus, Trash2, Send, CheckCircle, AlertCircle } from 'lucide-react';
@@ -8,6 +8,26 @@ const CandidateOnboarding = () => {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [submitted, setSubmitted] = useState(false);
     const [error, setError] = useState(null);
+    const [lookups, setLookups] = useState({});
+
+    // Load hr_lookups reference data on mount
+    useEffect(() => {
+        supabase
+            .from('hr_lookups')
+            .select('type, item, item_full_name')
+            .eq('is_active', true)
+            .order('sort_order')
+            .then(({ data }) => {
+                if (data) {
+                    setLookups(
+                        data.reduce((acc, row) => {
+                            (acc[row.type] = acc[row.type] || []).push(row);
+                            return acc;
+                        }, {})
+                    );
+                }
+            });
+    }, []);
 
     // Initial State using the structure from the requirements
     const [formData, setFormData] = useState({
@@ -43,7 +63,7 @@ const CandidateOnboarding = () => {
             city: '',
             postalCode: '',
             state: '',
-            country: 'Singapore',
+            country: '',
             homePhone: '',
             mobilePhone: ''
         },
@@ -90,6 +110,35 @@ const CandidateOnboarding = () => {
     const MARITAL_STATUS_OPTIONS = [
         'Single / 单身', 'Married / 已婚', 'Widowed / 寡', 'Divorced / 离婚', 'Separated / 分开'
     ];
+
+    const RELATION_OPTIONS = [
+        'Spouse', 'Father', 'Mother', 'Parent', 'Brother', 'Sister',
+        'Son', 'Daughter', 'Child', 'Relative', 'Friend', 'Others'
+    ];
+
+    const GENDER_OPTIONS = ['Male', 'Female'];
+    const ADDRESS_TYPE_OPTIONS = ['Local', 'Overseas', 'Mailing'];
+    const COUNTRY_OPTIONS = [
+        { label: 'Singapore / 新加坡', value: 'SG - Singapore' },
+        { label: 'Malaysia / 马来西亚', value: 'MY - Malaysia' },
+    ];
+
+    // Returns [{label: item, value: item_full_name}] from hr_lookups if available,
+    // otherwise falls back to the provided array (supports both plain strings and {label,value} objects).
+    const getLookupOptions = (type, fallback = []) => {
+        const rows = lookups[type];
+        if (rows?.length) {
+            return [
+                { label: '', value: '' },
+                ...rows.map(r => ({ label: r.item, value: r.item_full_name }))
+            ];
+        }
+        const first = fallback[0];
+        if (first && typeof first === 'object') {
+            return [{ label: '', value: '' }, ...fallback];
+        }
+        return ['', ...fallback];
+    };
 
     const handleChange = (section, field, value) => {
         setFormData(prev => ({
@@ -164,6 +213,14 @@ const CandidateOnboarding = () => {
                 status: 'submitted'
             };
 
+            // Remove any previous submission for this application before inserting
+            if (applicationId) {
+                await supabase
+                    .from('onboarding_submissions')
+                    .delete()
+                    .eq('application_id', applicationId);
+            }
+
             const { error: insertError } = await supabase
                 .from('onboarding_submissions')
                 .insert([payload]);
@@ -235,35 +292,35 @@ const CandidateOnboarding = () => {
                                 <FormInput label="First Name / 名" value={formData.personal.firstName} onChange={(e) => handleChange('personal', 'firstName', e.target.value)} required />
                                 <FormInput label="Middle Name" value={formData.personal.middleName} onChange={(e) => handleChange('personal', 'middleName', e.target.value)} />
 
-                                <FormInput label="Employee Name / 姓名" value={formData.personal.chineseName} onChange={(e) => handleChange('personal', 'chineseName', e.target.value)} />
-                                <FormSelect label="Gender / 性别" value={formData.personal.gender} onChange={(e) => handleChange('personal', 'gender', e.target.value)} options={['', 'Male', 'Female']} />
-                                <FormSelect label="Nationality / 国籍" value={formData.personal.nationality} onChange={(e) => handleChange('personal', 'nationality', e.target.value)} options={['', ...NATIONALITY_OPTIONS]} required />
+                                <FormInput label="Full Name / 姓名" value={formData.personal.chineseName} onChange={(e) => handleChange('personal', 'chineseName', e.target.value)} />
+                                <FormSelect label="Gender / 性别" value={formData.personal.gender} onChange={(e) => handleChange('personal', 'gender', e.target.value)} options={getLookupOptions('Gender', GENDER_OPTIONS)} />
+                                <FormSelect label="Nationality / 国籍" value={formData.personal.nationality} onChange={(e) => handleChange('personal', 'nationality', e.target.value)} options={getLookupOptions('Nationality', NATIONALITY_OPTIONS)} required />
 
 
                                 <FormInput label="Identity No (NRIC/FIN/Passport)" value={formData.personal.identityNo} onChange={(e) => handleChange('personal', 'identityNo', e.target.value)} required />
                                 <FormInput label="Date of Birth / 出生日期" type="date" value={formData.personal.dob} onChange={(e) => handleChange('personal', 'dob', e.target.value)} required />
                                 <FormInput label="Birth Place / 出生地点" value={formData.personal.birthPlace} onChange={(e) => handleChange('personal', 'birthPlace', e.target.value)} required />
 
-                                <FormSelect label="Race / 种族" value={formData.personal.race} onChange={(e) => handleChange('personal', 'race', e.target.value)} options={['', ...RACE_OPTIONS]} />
-                                <FormSelect label="Dialect / 方言" value={formData.personal.dialect} onChange={(e) => handleChange('personal', 'dialect', e.target.value)} options={['', ...DIALECT_OPTIONS]} />
-                                <FormSelect label="Religion / 宗教" value={formData.personal.religion} onChange={(e) => handleChange('personal', 'religion', e.target.value)} options={['', ...RELIGION_OPTIONS]} />
+                                <FormSelect label="Race / 种族" value={formData.personal.race} onChange={(e) => handleChange('personal', 'race', e.target.value)} options={getLookupOptions('Race', RACE_OPTIONS)} />
+                                <FormSelect label="Dialect / 方言" value={formData.personal.dialect} onChange={(e) => handleChange('personal', 'dialect', e.target.value)} options={getLookupOptions('Dialect', DIALECT_OPTIONS)} />
+                                <FormSelect label="Religion / 宗教" value={formData.personal.religion} onChange={(e) => handleChange('personal', 'religion', e.target.value)} options={getLookupOptions('Religion', RELIGION_OPTIONS)} />
                             </div>
 
                             <div className="mt-6">
-                                <FormSelect label="Contributions to Self-Help Group Funds / 向自助困基金捐款" value={formData.personal.contributions} onChange={(e) => handleChange('personal', 'contributions', e.target.value)} options={['', ...CONTRIBUTION_OPTIONS]} />
+                                <FormSelect label="Contributions to Self-Help Group Funds / 向自助困基金捐款" value={formData.personal.contributions} onChange={(e) => handleChange('personal', 'contributions', e.target.value)} options={getLookupOptions('Contributions', CONTRIBUTION_OPTIONS)} />
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
-                                <FormSelect label="Marital Status / 婚姻状况" value={formData.personal.maritalStatus} onChange={(e) => handleChange('personal', 'maritalStatus', e.target.value)} options={['', ...MARITAL_STATUS_OPTIONS]} />
-                                {formData.personal.maritalStatus && formData.personal.maritalStatus.includes('Married') && (
+                                <FormSelect label="Marital Status / 婚姻状况" value={formData.personal.maritalStatus} onChange={(e) => handleChange('personal', 'maritalStatus', e.target.value)} options={getLookupOptions('Marital Status', MARITAL_STATUS_OPTIONS)} />
+                                {formData.personal.maritalStatus?.toLowerCase().includes('married') && (
                                     <FormInput label="Marriage Date / 结婚日期" type="date" value={formData.personal.marriageDate} onChange={(e) => handleChange('personal', 'marriageDate', e.target.value)} />
                                 )}
                             </div>
 
-                            {(formData.personal.maritalStatus && formData.personal.maritalStatus.includes('Married')) && (
+                            {formData.personal.maritalStatus?.toLowerCase().includes('married') && (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6 pt-4 border-t border-slate-50">
                                     <FormInput label="Spouse Name / 配偶姓名" value={formData.personal.spouseName} onChange={(e) => handleChange('personal', 'spouseName', e.target.value)} />
-                                    <FormSelect label="Spouse Nationality / 配偶国籍" value={formData.personal.spouseNationality} onChange={(e) => handleChange('personal', 'spouseNationality', e.target.value)} options={['', ...NATIONALITY_OPTIONS]} />
+                                    <FormSelect label="Spouse Nationality / 配偶国籍" value={formData.personal.spouseNationality} onChange={(e) => handleChange('personal', 'spouseNationality', e.target.value)} options={getLookupOptions('Nationality', NATIONALITY_OPTIONS)} />
                                 </div>
                             )}
                         </section>
@@ -283,9 +340,9 @@ const CandidateOnboarding = () => {
                                         <h4 className="font-medium text-slate-700 mb-4">Child {index + 1}</h4>
                                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                                             <FormInput label="Name" value={child.name} onChange={(e) => updateChild(index, 'name', e.target.value)} />
-                                            <FormSelect label="Nationality" value={child.nationality} onChange={(e) => updateChild(index, 'nationality', e.target.value)} options={['', ...NATIONALITY_OPTIONS]} />
+                                            <FormSelect label="Nationality" value={child.nationality} onChange={(e) => updateChild(index, 'nationality', e.target.value)} options={getLookupOptions('Nationality', NATIONALITY_OPTIONS)} />
                                             <FormInput label="Date of Birth" type="date" value={child.dob} onChange={(e) => updateChild(index, 'dob', e.target.value)} />
-                                            <FormSelect label="Gender" value={child.gender} onChange={(e) => updateChild(index, 'gender', e.target.value)} options={['', 'Male', 'Female']} />
+                                            <FormSelect label="Gender" value={child.gender} onChange={(e) => updateChild(index, 'gender', e.target.value)} options={getLookupOptions('Gender', GENDER_OPTIONS)} />
                                         </div>
                                     </div>
                                 ))}
@@ -302,7 +359,25 @@ const CandidateOnboarding = () => {
                                 Contact Details / 联络资料
                             </h2>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                                <FormSelect label="Address Type" value={formData.contact.addressType} onChange={(e) => handleChange('contact', 'addressType', e.target.value)} options={['', 'Local', 'Overseas', 'Mailing']} />
+                                <FormSelect label="Address Type" value={formData.contact.addressType}
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        handleChange('contact', 'addressType', val);
+                                        const addrRows = lookups['Address Type'] || [];
+                                        const selected = addrRows.find(r => r.item_full_name === val);
+                                        const isLocal = selected?.item?.toLowerCase().includes('local') || val.toLowerCase().includes('local');
+                                        if (isLocal) {
+                                            const countryRows = lookups['Country'] || [];
+                                            const sgRow = countryRows.find(r =>
+                                                r.item.toLowerCase().includes('singapore') ||
+                                                r.item_full_name.toLowerCase().includes('singapore')
+                                            );
+                                            handleChange('contact', 'country', sgRow ? sgRow.item_full_name : 'SG - Singapore');
+                                        } else {
+                                            handleChange('contact', 'country', '');
+                                        }
+                                    }}
+                                    options={getLookupOptions('Address Type', ADDRESS_TYPE_OPTIONS)} />
                                 <FormInput label="Block No" value={formData.contact.blockNo} onChange={(e) => handleChange('contact', 'blockNo', e.target.value)} />
                             </div>
                             <div className="space-y-4">
@@ -314,7 +389,7 @@ const CandidateOnboarding = () => {
                                 <FormInput label="City" value={formData.contact.city} onChange={(e) => handleChange('contact', 'city', e.target.value)} />
                                 <FormInput label="Postal Code" value={formData.contact.postalCode} onChange={(e) => handleChange('contact', 'postalCode', e.target.value)} required />
                                 <FormInput label="State" value={formData.contact.state} onChange={(e) => handleChange('contact', 'state', e.target.value)} />
-                                <FormInput label="Country" value={formData.contact.country} onChange={(e) => handleChange('contact', 'country', e.target.value)} required />
+                                <FormSelect label="Country" value={formData.contact.country} onChange={(e) => handleChange('contact', 'country', e.target.value)} options={getLookupOptions('Country', COUNTRY_OPTIONS)} required />
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
                                 <FormInput label="Home Phone No." value={formData.contact.homePhone} onChange={(e) => handleChange('contact', 'homePhone', e.target.value)} />
@@ -337,7 +412,7 @@ const CandidateOnboarding = () => {
                                             </button>
                                         )}
                                         <FormInput label="Name / 姓名" value={contact.name} onChange={(e) => updateEmergencyContact(index, 'name', e.target.value)} required />
-                                        <FormInput label="Relation / 关系" value={contact.relation} onChange={(e) => updateEmergencyContact(index, 'relation', e.target.value)} required />
+                                        <FormSelect label="Relation / 关系" value={contact.relation} onChange={(e) => updateEmergencyContact(index, 'relation', e.target.value)} options={getLookupOptions('Relation', RELATION_OPTIONS)} required />
                                         <FormInput label="Contact No / 电话" value={contact.contactNo} onChange={(e) => updateEmergencyContact(index, 'contactNo', e.target.value)} required />
                                     </div>
                                 ))}
@@ -396,9 +471,12 @@ const FormSelect = ({ label, value, onChange, options, required = false }) => (
             required={required}
             className="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all bg-white"
         >
-            {options.map(opt => (
-                <option key={opt} value={opt}>{opt}</option>
-            ))}
+            {options.map(opt => {
+                const isObj = typeof opt === 'object' && opt !== null;
+                const val = isObj ? opt.value : opt;
+                const lbl = isObj ? opt.label : opt;
+                return <option key={val} value={val}>{lbl}</option>;
+            })}
         </select>
     </div>
 );

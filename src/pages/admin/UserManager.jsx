@@ -112,6 +112,7 @@ const UserManager = () => {
         { path: '/admin/jobs/offboarding', label: 'Offboarding (Job Manager)' },
         { path: '/admin/events', label: 'Event Manager' },
         { path: '/admin/users', label: 'User Management' },
+        { path: '/admin/settings', label: 'Settings' },
     ];
 
     const roles = ['super_admin', 'site_admin', 'hr_user', 'admin', 'marketing'];

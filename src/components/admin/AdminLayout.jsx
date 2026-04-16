@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { Layout, Briefcase, LogOut, Menu, X, Users, FileEdit, BarChart2, Calendar } from 'lucide-react';
+import { Layout, Briefcase, LogOut, Menu, X, Users, FileEdit, BarChart2, Calendar, Settings } from 'lucide-react';
 import LanguageSwitcher from '../LanguageSwitcher';
 import logo from '../../assets/logo.png';
 
@@ -47,6 +47,11 @@ const AdminLayout = ({ children }) => {
             path: '/admin/events',
             label: 'Event Manager',
             icon: <Calendar size={20} />
+        },
+        {
+            path: '/admin/settings',
+            label: 'Settings',
+            icon: <Settings size={20} />
         },
     ];
 

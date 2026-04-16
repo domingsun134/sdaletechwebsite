@@ -1,7 +1,8 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import HeroSection from '../components/HeroSection';
-import { MapPin, Award, CheckCircle } from 'lucide-react';
+import { MapPin, Award, CheckCircle, ZoomIn, ZoomOut, Maximize } from 'lucide-react';
+import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import CorporateStructure from '../components/CorporateStructure';
 
 const GlobalPresence = () => {
@@ -321,97 +322,128 @@ const GlobalPresence = () => {
             <section className="py-20 bg-slate-900 text-white relative overflow-hidden">
                 <div className="container-custom">
                     <div className="relative max-w-6xl mx-auto">
-                        <div className="relative bg-slate-800 rounded-2xl p-8 border border-slate-700 overflow-hidden">
-                            {/* World Map Background Image */}
-                            <div className="absolute inset-0 flex items-center justify-center p-8">
-                                <img
-                                    src="/world-map.png"
-                                    alt="World Map"
-                                    className="w-full h-full object-contain opacity-50 brightness-0 invert"
-                                />
-                            </div>
+                        <TransformWrapper
+                            initialScale={1}
+                            minScale={1}
+                            maxScale={4}
+                            centerZoomedOut={true}
+                            wheel={{ activationKeys: ["Control", "Shift", "Meta", "Alt"] }}
+                            pinch={{ step: 5 }}
+                        >
+                            {({ zoomIn, zoomOut, resetTransform }) => (
+                                <React.Fragment>
+                                    <div className="flex justify-end mb-4 gap-2 md:hidden">
+                                        <button className="p-2 bg-slate-800 rounded-lg hover:bg-slate-700 transition-colors" onClick={() => zoomIn()}>
+                                            <ZoomIn size={20} />
+                                        </button>
+                                        <button className="p-2 bg-slate-800 rounded-lg hover:bg-slate-700 transition-colors" onClick={() => zoomOut()}>
+                                            <ZoomOut size={20} />
+                                        </button>
+                                        <button className="p-2 bg-slate-800 rounded-lg hover:bg-slate-700 transition-colors" onClick={() => resetTransform()}>
+                                            <Maximize size={20} />
+                                        </button>
+                                    </div>
+                                    <div className="relative bg-slate-800 rounded-2xl p-8 border border-slate-700 overflow-hidden cursor-grab active:cursor-grabbing">
+                                        <TransformComponent wrapperStyle={{ width: "100%", height: "100%" }} contentStyle={{ width: "100%" }}>
+                                            <div className="relative w-full h-full min-h-[300px] md:min-h-0 flex items-center justify-center">
+                                                {/* World Map Background Image */}
+                                                <div className="absolute inset-0 flex items-center justify-center p-8">
+                                                    <img
+                                                        src="/world-map.png"
+                                                        alt="World Map"
+                                                        className="w-full h-full object-contain opacity-50 brightness-0 invert"
+                                                    />
+                                                </div>
 
-                            {/* SVG Overlay for Markers */}
-                            <svg viewBox="0 0 100 80" className="w-full h-auto relative z-10">
-                                {/* Location Markers with Labels */}
-                                {mapLocations.map((location, index) => {
-                                    // Calculate label position (offset from marker)
-                                    // Flip label to left side for specific cities to reduce overlap
-                                    const labelOffset = 2;
-                                    const flipLeft = ['chuzhou', 'suzhou', 'guangzhou', 'zhongshan', 'chennai', 'arizona', 'jakarta', 'rayong'].includes(location.id);
-                                    const labelX = flipLeft ? location.x - labelOffset : location.x + labelOffset;
-                                    // Make Singapore, Batam, Jakarta, and Chennai's line horizontal (same Y as marker)
-                                    const labelY = ['singapore', 'batam', 'jakarta', 'chennai'].includes(location.id) ? location.y : location.y - labelOffset;
+                                                {/* SVG Overlay for Markers */}
+                                                <svg viewBox="0 0 100 80" className="w-full h-auto relative z-10" style={{ maxWidth: '100%' }}>
+                                                    {/* Location Markers with Labels */}
+                                                    {mapLocations.map((location, index) => {
+                                                        // Calculate label position (offset from marker)
+                                                        // Flip label to left side for specific cities to reduce overlap
+                                                        const labelOffset = 2;
+                                                        const flipLeft = ['chuzhou', 'suzhou', 'guangzhou', 'zhongshan', 'chennai', 'arizona', 'jakarta', 'rayong'].includes(location.id);
+                                                        const labelX = flipLeft ? location.x - labelOffset : location.x + labelOffset;
+                                                        // Make Singapore, Batam, Jakarta, and Chennai's line horizontal (same Y as marker)
+                                                        const labelY = ['singapore', 'batam', 'jakarta', 'chennai'].includes(location.id) ? location.y : location.y - labelOffset;
 
-                                    return (
-                                        <g key={location.id}>
-                                            {/* Connecting line from marker to label */}
-                                            <motion.line
-                                                x1={location.x}
-                                                y1={location.y}
-                                                x2={labelX}
-                                                y2={labelY}
-                                                stroke="white"
-                                                strokeWidth="0.08"
-                                                opacity="0.4"
-                                                initial={{ opacity: 0 }}
-                                                animate={{ opacity: 0.4 }}
-                                                transition={{ duration: 0.4, delay: index * 0.05 }}
-                                            />
+                                                        return (
+                                                            <g key={location.id}>
+                                                                {/* Connecting line from marker to label */}
+                                                                <motion.line
+                                                                    x1={location.x}
+                                                                    y1={location.y}
+                                                                    x2={labelX}
+                                                                    y2={labelY}
+                                                                    stroke="white"
+                                                                    strokeWidth="0.08"
+                                                                    opacity="0.4"
+                                                                    initial={{ opacity: 0 }}
+                                                                    animate={{ opacity: 0.4 }}
+                                                                    transition={{ duration: 0.4, delay: index * 0.05 }}
+                                                                />
 
-                                            {/* Location marker */}
-                                            <motion.circle
-                                                cx={location.x}
-                                                cy={location.y}
-                                                r="0.4"
-                                                fill="#E31E24"
-                                                stroke="white"
-                                                strokeWidth="0.2"
-                                                whileHover={{ scale: 2 }}
-                                                initial={{ scale: 0, opacity: 0 }}
-                                                animate={{ scale: 1, opacity: 1 }}
-                                                transition={{ duration: 0.4, delay: index * 0.05 }}
-                                            />
+                                                                {/* Location marker */}
+                                                                <motion.circle
+                                                                    cx={location.x}
+                                                                    cy={location.y}
+                                                                    r="0.4"
+                                                                    fill="#E31E24"
+                                                                    stroke="white"
+                                                                    strokeWidth="0.2"
+                                                                    whileHover={{ scale: 2 }}
+                                                                    initial={{ scale: 0, opacity: 0 }}
+                                                                    animate={{ scale: 1, opacity: 1 }}
+                                                                    transition={{ duration: 0.4, delay: index * 0.05 }}
+                                                                />
 
-                                            {/* Pulsing effect */}
-                                            <motion.circle
-                                                cx={location.x}
-                                                cy={location.y}
-                                                r="1.5"
-                                                fill="#E31E24"
-                                                className="pointer-events-none"
-                                                animate={{
-                                                    scale: [1, 1.5, 1],
-                                                    opacity: [0.3, 0, 0.3]
-                                                }}
-                                                transition={{
-                                                    duration: 2.5,
-                                                    repeat: Infinity,
-                                                    delay: index * 0.2
-                                                }}
-                                            />
+                                                                {/* Pulsing effect */}
+                                                                <motion.circle
+                                                                    cx={location.x}
+                                                                    cy={location.y}
+                                                                    r="1.5"
+                                                                    fill="#E31E24"
+                                                                    className="pointer-events-none"
+                                                                    animate={{
+                                                                        scale: [1, 1.5, 1],
+                                                                        opacity: [0.3, 0, 0.3]
+                                                                    }}
+                                                                    transition={{
+                                                                        duration: 2.5,
+                                                                        repeat: Infinity,
+                                                                        delay: index * 0.2
+                                                                    }}
+                                                                />
 
-                                            {/* Text label */}
-                                            <motion.text
-                                                x={labelX}
-                                                y={labelY}
-                                                fill="white"
-                                                fontSize="1.1"
-                                                fontWeight="500"
-                                                textAnchor={flipLeft ? "end" : "start"}
-                                                className="pointer-events-none select-none"
-                                                style={{ textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}
-                                                initial={{ opacity: 0 }}
-                                                animate={{ opacity: 1 }}
-                                                transition={{ duration: 0.4, delay: index * 0.05 + 0.2 }}
-                                            >
-                                                {location.name}
-                                            </motion.text>
-                                        </g>
-                                    );
-                                })}
-                            </svg>
-                        </div>
+                                                                {/* Text label */}
+                                                                <motion.text
+                                                                    x={labelX}
+                                                                    y={labelY}
+                                                                    fill="white"
+                                                                    fontSize="1.1"
+                                                                    fontWeight="500"
+                                                                    textAnchor={flipLeft ? "end" : "start"}
+                                                                    className="pointer-events-none select-none"
+                                                                    style={{ textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}
+                                                                    initial={{ opacity: 0 }}
+                                                                    animate={{ opacity: 1 }}
+                                                                    transition={{ duration: 0.4, delay: index * 0.05 + 0.2 }}
+                                                                >
+                                                                    {location.name}
+                                                                </motion.text>
+                                                            </g>
+                                                        );
+                                                    })}
+                                                </svg>
+                                            </div>
+                                        </TransformComponent>
+                                    </div>
+                                    <div className="text-center text-sm text-slate-400 mt-4 md:hidden">
+                                        Pinch or tap buttons to zoom. Drag to pan.
+                                    </div>
+                                </React.Fragment>
+                            )}
+                        </TransformWrapper>
                     </div>
                 </div>
             </section>
@@ -427,10 +459,10 @@ const GlobalPresence = () => {
                         {locations.asia.map((location, index) => renderLocationCard(location, index))}
                     </div>
                 </div>
-            </section>
+            </section >
 
             {/* Americas Locations */}
-            <section className="py-20 bg-white">
+            < section className="py-20 bg-white" >
                 <div className="container-custom">
                     <div className="text-center mb-12">
                         <h2 className="text-3xl font-bold mb-4 text-slate-900">Americas</h2>
@@ -440,10 +472,10 @@ const GlobalPresence = () => {
                         {locations.americas.map((location, index) => renderLocationCard(location, index))}
                     </div>
                 </div>
-            </section>
+            </section >
 
             {/* Europe Locations */}
-            <section className="py-20 bg-slate-50">
+            < section className="py-20 bg-slate-50" >
                 <div className="container-custom">
                     <div className="text-center mb-12">
                         <h2 className="text-3xl font-bold mb-4 text-slate-900">Europe</h2>
@@ -453,13 +485,13 @@ const GlobalPresence = () => {
                         {locations.europe.map((location, index) => renderLocationCard(location, index))}
                     </div>
                 </div>
-            </section>
+            </section >
 
             {/* Corporate Structure */}
-            <CorporateStructure />
+            < CorporateStructure />
 
             {/* Quality Certifications */}
-            <section className="py-20 bg-primary text-white">
+            < section className="py-20 bg-primary text-white" >
                 <div className="container-custom">
                     <div className="text-center mb-12">
                         <motion.div
@@ -496,8 +528,8 @@ const GlobalPresence = () => {
                         ))}
                     </div>
                 </div>
-            </section>
-        </div>
+            </section >
+        </div >
     );
 };
 

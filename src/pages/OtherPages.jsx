@@ -7,8 +7,6 @@ import automotiveImg from '../assets/auto-banner.jpg';
 import consumerImg from '../assets/consumer.jpg';
 import healthcareImg from '../assets/health.jpg';
 import toolingImg from '../assets/tooling.jpg';
-import ppeImg from '../assets/sdalemask.jpg';
-
 export const About = () => (
     <div>
         <HeroSection
@@ -57,13 +55,6 @@ export const Business = () => {
             description: "World-class tooling capabilities to support complex manufacturing needs.",
             color: "bg-gray-50",
             link: "/business/tooling"
-        },
-        {
-            title: "Personal Protective Equipment",
-            image: ppeImg,
-            description: "ISO13485 certified surgical masks with high filtration capacity, meeting EN14683 and ASTM F2100 standards.",
-            color: "bg-blue-50",
-            link: "/business/ppe"
         }
     ];
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Menu, X, Search, Globe } from 'lucide-react';
+import { Menu, X, Search, Globe, ChevronDown, ChevronUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
 import logo from '../assets/logo.png';
@@ -11,6 +11,7 @@ const Header = () => {
     const [isOpen, setIsOpen] = useState(false);
     const [isSearchOpen, setIsSearchOpen] = useState(false);
     const [scrolled, setScrolled] = useState(false);
+    const [expandedMobileMenu, setExpandedMobileMenu] = useState(null);
     const location = useLocation();
 
     useEffect(() => {
@@ -47,8 +48,7 @@ const Header = () => {
                 { name: 'Automotive / Aerospace', path: '/business/automotive' },
                 { name: 'Consumer / IT', path: '/business/consumer-it' },
                 { name: 'Healthcare', path: '/business/healthcare' },
-                { name: 'Tooling', path: '/business/tooling' },
-                { name: 'Personal Protective Equipment', path: '/business/ppe' }
+                { name: 'Tooling', path: '/business/tooling' }
             ]
         },
         {
@@ -60,7 +60,17 @@ const Header = () => {
                 { name: 'Manufacturing', path: '/capabilities/manufacturing' }
             ]
         },
-        { name: 'Investor Relations', path: '/investor-relations' },
+        {
+            name: 'Investor Relations',
+            path: '/investor-relations',
+            submenu: [
+                { name: 'Overview', path: '/investor-relations' },
+                ...(import.meta.env.DEV ? [{ name: 'Latest News', path: '/investor-relations/newsroom' }] : []),
+                { name: 'Financial Statements', path: '/investor-relations/financials' },
+                { name: 'Annual Reports', path: '/investor-relations/annual-reports' },
+                ...(import.meta.env.DEV ? [{ name: 'Sustainability Reports', path: '/investor-relations/sustainability-reports' }] : [])
+            ]
+        },
         { name: 'Contact Us', path: '/contact' },
         { name: 'Careers', path: '/careers' },
     ];
@@ -169,18 +179,56 @@ const Header = () => {
                             initial={{ opacity: 0, y: -20 }}
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0, y: -20 }}
-                            className="absolute top-full left-0 w-full bg-white shadow-lg md:hidden"
+                            className="absolute top-full left-0 w-full bg-white shadow-lg md:hidden max-h-[85vh] overflow-y-auto"
                         >
                             <div className="flex flex-col p-4">
                                 {navLinks.map((link) => (
-                                    <Link
-                                        key={link.name}
-                                        to={link.path}
-                                        className="py-3 text-gray-800 font-medium border-b border-gray-100 last:border-none"
-                                        onClick={() => setIsOpen(false)}
-                                    >
-                                        {link.name}
-                                    </Link>
+                                    <div key={link.name} className="border-b border-gray-100 last:border-none">
+                                        <div className="flex justify-between items-center py-3">
+                                            <Link
+                                                to={link.path}
+                                                className="text-gray-800 font-medium w-full"
+                                                onClick={() => {
+                                                    if (!link.submenu) setIsOpen(false);
+                                                }}
+                                            >
+                                                {link.name}
+                                            </Link>
+                                            {link.submenu && (
+                                                <button
+                                                    onClick={() => setExpandedMobileMenu(expandedMobileMenu === link.name ? null : link.name)}
+                                                    className="p-2 -mr-2 text-gray-500"
+                                                >
+                                                    {expandedMobileMenu === link.name ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                                                </button>
+                                            )}
+                                        </div>
+                                        {link.submenu && (
+                                            <AnimatePresence>
+                                                {expandedMobileMenu === link.name && (
+                                                    <motion.div
+                                                        initial={{ opacity: 0, height: 0 }}
+                                                        animate={{ opacity: 1, height: 'auto' }}
+                                                        exit={{ opacity: 0, height: 0 }}
+                                                        className="overflow-hidden"
+                                                    >
+                                                        <div className="pl-4 pb-3 flex flex-col gap-3">
+                                                            {link.submenu.map((subItem) => (
+                                                                <Link
+                                                                    key={subItem.name}
+                                                                    to={subItem.path}
+                                                                    className="text-sm text-gray-600 hover:text-blue-600"
+                                                                    onClick={() => setIsOpen(false)}
+                                                                >
+                                                                    {subItem.name}
+                                                                </Link>
+                                                            ))}
+                                                        </div>
+                                                    </motion.div>
+                                                )}
+                                            </AnimatePresence>
+                                        )}
+                                    </div>
                                 ))}
                             </div>
                         </motion.div>

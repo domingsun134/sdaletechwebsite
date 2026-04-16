@@ -9,8 +9,6 @@ import automotiveImg from '../assets/auto-banner.jpg';
 import consumerImg from '../assets/consumer.jpg';
 import healthcareImg from '../assets/health.jpg';
 import toolingImg from '../assets/tooling.jpg';
-import ppeImg from '../assets/sdalemask.jpg';
-
 const Home = () => {
     const { content } = useContent();
     const { hero, about, globalFootprint } = content.home;
@@ -43,13 +41,6 @@ const Home = () => {
             description: "World-class tooling capabilities to support complex manufacturing needs.",
             color: "bg-gray-50",
             link: "/business/tooling"
-        },
-        {
-            title: "Personal Protective Equipment",
-            image: ppeImg,
-            description: "ISO13485 certified surgical masks with high filtration capacity, meeting EN14683 and ASTM F2100 standards.",
-            color: "bg-blue-50",
-            link: "/business/ppe"
         }
     ];
 
@@ -99,7 +90,7 @@ const Home = () => {
                         <div className="w-24 h-1.5 bg-primary mx-auto rounded-full"></div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-8">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
                         {businessSegments.map((segment, index) => (
                             <motion.div
                                 key={segment.title}

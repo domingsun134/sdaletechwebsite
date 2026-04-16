@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, User, Users, MapPin, Phone, AlertCircle, CheckCircle, ShieldCheck, AlertTriangle, Edit2, Save, Building2, Briefcase, Calendar, Clock } from 'lucide-react';
+import { X, User, Users, MapPin, Phone, AlertCircle, CheckCircle, ShieldCheck, AlertTriangle, Edit2, Save, Building2, Briefcase, Calendar, Clock, Code2, Copy, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
 
@@ -36,6 +36,19 @@ const OnboardingDetailsModal = ({ isOpen, onClose, data, isLoading, onUpdate, ca
     const [isSearchingManager, setIsSearchingManager] = useState(false);
     const [searchTimeout, setSearchTimeout] = useState(null);
 
+    // RPA JSON preview state
+    const [showRpaJson, setShowRpaJson] = useState(false);
+    const [rpaJson, setRpaJson] = useState(null);
+    const [jsonCopied, setJsonCopied] = useState(false);
+    const [isProvisioning, setIsProvisioning] = useState(false);
+
+    // HR lookup reference data (Nationality, Race, Gender, etc.)
+    const [lookups, setLookups] = useState({});
+
+    // System settings
+    const DEFAULT_RPA_EMAILS = 'meichern.oh@sdaletech.com;linkang.sun@sdaletech.com;elaine.tua@sdaletech.com;vivien.lye@sdaletech.com;jessica.wong@sdaletech.com;helen.ng@sdaletech.com;pohwi.tan@sdaletech.com';
+    const [rpaEmails, setRpaEmails] = useState(DEFAULT_RPA_EMAILS);
+
     useEffect(() => {
         if (data) {
             setFormData(JSON.parse(JSON.stringify(data)));
@@ -51,13 +64,16 @@ const OnboardingDetailsModal = ({ isOpen, onClose, data, isLoading, onUpdate, ca
                     { data: locationsData },
                     { data: companiesData },
                     { data: departmentsData },
-                    { data: jobTitlesData }
+                    { data: jobTitlesData },
+                    { data: lookupsData }
                 ] = await Promise.all([
                     supabase.from('regions').select('item, item_full_name').order('item'),
                     supabase.from('locations').select('item, item_full_name').order('item'),
                     supabase.from('companies').select('item, item_full_name').order('item'),
                     supabase.from('departments').select('item, item_full_name').order('item'),
-                    supabase.from('job_titles').select('item').order('item')
+                    supabase.from('job_titles').select('code, item').order('item'),
+                    supabase.from('hr_lookups').select('type, item, item_full_name')
+                        .eq('is_active', true).order('sort_order')
                 ]);
 
                 if (regionsData) setRegions(regionsData);
@@ -65,6 +81,25 @@ const OnboardingDetailsModal = ({ isOpen, onClose, data, isLoading, onUpdate, ca
                 if (companiesData) setCompanies(companiesData);
                 if (departmentsData) setDepartments(departmentsData);
                 if (jobTitlesData) setJobTitles(jobTitlesData);
+                if (lookupsData) {
+                    setLookups(
+                        lookupsData.reduce((acc, row) => {
+                            (acc[row.type] = acc[row.type] || []).push(row);
+                            return acc;
+                        }, {})
+                    );
+                }
+
+                // Fetch system settings for RPA email list
+                try {
+                    const settingsRes = await fetch('/api/system-settings', {
+                        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                    });
+                    if (settingsRes.ok) {
+                        const settings = await settingsRes.json();
+                        if (settings.rpa_notification_emails) setRpaEmails(settings.rpa_notification_emails);
+                    }
+                } catch (_) { /* keep default */ }
 
             } catch (err) {
                 console.error('Error fetching dropdown data:', err);
@@ -80,11 +115,13 @@ const OnboardingDetailsModal = ({ isOpen, onClose, data, isLoading, onUpdate, ca
         const fetchHRDetails = async () => {
             if (data?.application_id) {
                 try {
-                    const { data: hrData, error } = await supabase
+                    const { data: hrRows } = await supabase
                         .from('hr_onboarding_details')
                         .select('*')
                         .eq('application_id', data.application_id)
-                        .maybeSingle();
+                        .order('created_at', { ascending: false })
+                        .limit(1);
+                    const hrData = hrRows?.[0] ?? null;
 
                     if (hrData) {
                         setHrFormData({
@@ -151,10 +188,16 @@ const OnboardingDetailsModal = ({ isOpen, onClose, data, isLoading, onUpdate, ca
 
         try {
             const payload = {
-                application_id: data.application_id, // Use application_id from submission data
+                application_id: data.application_id,
                 ...hrFormData,
                 probation_period: parseInt(hrFormData.probation_period) || 0
             };
+
+            // Delete any existing record first to avoid duplicate rows
+            await supabase
+                .from('hr_onboarding_details')
+                .delete()
+                .eq('application_id', data.application_id);
 
             const { error: insertError } = await supabase
                 .from('hr_onboarding_details')
@@ -162,29 +205,138 @@ const OnboardingDetailsModal = ({ isOpen, onClose, data, isLoading, onUpdate, ca
 
             if (insertError) throw insertError;
 
-            // Trigger AD Provisioning
-            try {
-                const response = await fetch(`/api/integrations/ad/provision`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ applicationId: data.application_id })
-                });
-
-                if (!response.ok) {
-                    console.warn('AD Provisioning trigger failed, but HR details saved.');
-                }
-            } catch (adError) {
-                console.error('Error triggering AD provisioning:', adError);
-            }
-
-            setToast({ type: 'success', message: 'HR details saved & AD Provisioning started' });
-            // Optional: Close modal or just show success
-            setTimeout(() => setToast(null), 3000);
+            setToast({ type: 'success', message: 'HR details saved. Review the JSON below before provisioning.' });
+            setTimeout(() => setToast(null), 4000);
+            // Auto-expand the RPA JSON preview so HR can review before triggering
+            setShowRpaJson(true);
         } catch (err) {
             console.error('Error submitting HR onboarding:', err);
             setHrError(err.message || 'Failed to submit onboarding details');
         } finally {
             setIsSubmittingHR(false);
+        }
+    };
+
+    // Returns [{label: item, value: item_full_name}] from hr_lookups if available,
+    // otherwise falls back to a plain string array.
+    const getLookupOptions = (type, fallback = []) => {
+        const rows = lookups[type];
+        if (rows?.length) {
+            return [
+                { label: '', value: '' },
+                ...rows.map(r => ({ label: r.item, value: r.item_full_name }))
+            ];
+        }
+        return ['', ...fallback];
+    };
+
+    const buildRpaPayload = () => {
+        const personal = formData?.personal_details || {};
+        const family = formData?.family_details || {};
+        const contact = formData?.contact_details || {};
+        const emergencyContacts = formData?.emergency_contacts || [];
+        const emergency = emergencyContacts[0] || {};
+        const children = family.children || [];
+        const getChild = (n) => children[n - 1] || {};
+
+        const identityNo = personal.identityNo || '';
+
+        const gender = personal.gender || '';
+        const maritalStatus = personal.maritalStatus || '';
+        let genderTitle = 'Mr';
+        if (gender.toLowerCase().includes('female')) {
+            genderTitle = maritalStatus.toLowerCase().includes('married') ? 'Mrs' : 'Ms';
+        }
+
+        return {
+            Employeecode: hrFormData.employee_code,
+            LoginCode: hrFormData.employee_code,
+            LastName: personal.lastName || '',
+            FirstName: personal.firstName || '',
+            MiddleName: personal.middleName || '',
+            AliasName: personal.chineseName || '',
+            Gender: gender,
+            Nationality: personal.nationality || '',
+            IdentityType: 'SG01 - NRIC Pink - Singaporean',
+            IdentityNo: identityNo,
+            BirthDate: personal.dob || '',
+            BirthPlace: personal.birthPlace || '',
+            Race: personal.race || '',
+            Dialect: personal.dialect || '',
+            Religion: personal.religion || '',
+            MaritalStatus: maritalStatus,
+            MarriageDate: personal.marriageDate || '',
+            PersonalEmail: candidate?.email || '',
+            HomePhoneNo: contact.homePhone || '',
+            MobilePhoneNo: contact.mobilePhone || '',
+            Address1: contact.address1 || '',
+            Address2: contact.address2 || '',
+            Address3: contact.address3 || '',
+            City: contact.city || '',
+            PostalCode: contact.postalCode || '',
+            State: contact.state || '',
+            Country: contact.country || '',
+            Company: hrFormData.company || '',
+            JoinDate: hrFormData.initial_join_date || '',
+            Period: String(hrFormData.probation_period ?? ''),
+            Department: hrFormData.department || '',
+            SpouseName: personal.spouseName || '',
+            SpouseNationality: personal.spouseNationality || '',
+            SpouseRelation: maritalStatus.toLowerCase().includes('married') ? 'Spouse' : '',
+            EmergencyContactName: emergency.name || '',
+            EmergencyContactRelation: emergency.relation || '',
+            EmergencyContactNo: emergency.contactNo || '',
+            NameofChild1: getChild(1).name || '',
+            Child1Nationality: getChild(1).nationality || '',
+            Child1BirthDate: getChild(1).dob || '',
+            NameofChild2: getChild(2).name || '',
+            Child2Nationality: getChild(2).nationality || '',
+            Child2BirthDate: getChild(2).dob || '',
+            NameofChild3: getChild(3).name || '',
+            Child3Nationality: getChild(3).nationality || '',
+            Child3BirthDate: getChild(3).dob || '',
+            NameofChild4: getChild(4).name || '',
+            Child4Nationality: getChild(4).nationality || '',
+            Child4BirthDate: getChild(4).dob || '',
+            NameofChild5: getChild(5).name || '',
+            Child5Nationality: getChild(5).nationality || '',
+            Child5BirthDate: getChild(5).dob || '',
+            ChildRelation: children.length > 0 ? 'Child' : '',
+            AddressType: contact.addressType || '',
+            BlockNo: contact.blockNo || '',
+            Email: rpaEmails,
+            Designation: hrFormData.job_title || '',
+            Location: hrFormData.location || '',
+            GenderTitle: genderTitle,
+            ID: data?.id
+        };
+    };
+
+    const handleRecomputeJson = () => {
+        setRpaJson(JSON.stringify(buildRpaPayload(), null, 2));
+    };
+
+    const handleCopyJson = () => {
+        navigator.clipboard.writeText(rpaJson ?? JSON.stringify(buildRpaPayload(), null, 2));
+        setJsonCopied(true);
+        setTimeout(() => setJsonCopied(false), 2000);
+    };
+
+    const handleProvision = async () => {
+        setIsProvisioning(true);
+        try {
+            const response = await fetch('/api/integrations/ad/provision', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ applicationId: data.application_id })
+            });
+            if (!response.ok) throw new Error('Provisioning request failed');
+            setToast({ type: 'success', message: 'AD provisioning request sent successfully.' });
+        } catch (err) {
+            setToast({ type: 'error', message: err.message || 'Failed to trigger AD provisioning.' });
+        } finally {
+            setIsProvisioning(false);
+            setTimeout(() => setToast(null), 4000);
         }
     };
 
@@ -423,6 +575,7 @@ const OnboardingDetailsModal = ({ isOpen, onClose, data, isLoading, onUpdate, ca
                 <div className="p-8 overflow-y-auto space-y-8">
                     {/* HR Onboarding Form - Only visible when verified */}
                     {verified_at && (
+                        <>
                         <section className="mb-8 border-b border-slate-200 pb-8">
                             <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2 pb-2 border-b border-slate-100">
                                 <Briefcase className="text-primary" size={20} />
@@ -467,7 +620,7 @@ const OnboardingDetailsModal = ({ isOpen, onClose, data, isLoading, onUpdate, ca
                                         >
                                             <option value="">Select Job Title</option>
                                             {jobTitles.map((title) => (
-                                                <option key={title.item} value={title.item}>{title.item}</option>
+                                                <option key={title.item} value={title.code ? `${title.code} - ${title.item}` : title.item}>{title.item}</option>
                                             ))}
                                         </select>
                                     </div>
@@ -486,7 +639,7 @@ const OnboardingDetailsModal = ({ isOpen, onClose, data, isLoading, onUpdate, ca
                                         >
                                             <option value="">Select Company</option>
                                             {companies.map((comp) => (
-                                                <option key={comp.item} value={comp.item}>{comp.item}</option>
+                                                <option key={comp.item} value={comp.item_full_name || comp.item}>{comp.item}</option>
                                             ))}
                                         </select>
                                     </div>
@@ -505,7 +658,7 @@ const OnboardingDetailsModal = ({ isOpen, onClose, data, isLoading, onUpdate, ca
                                         >
                                             <option value="">Select Department</option>
                                             {departments.map((dept) => (
-                                                <option key={dept.item} value={dept.item}>{dept.item}</option>
+                                                <option key={dept.item} value={dept.item_full_name || dept.item}>{dept.item}</option>
                                             ))}
                                         </select>
                                     </div>
@@ -543,7 +696,7 @@ const OnboardingDetailsModal = ({ isOpen, onClose, data, isLoading, onUpdate, ca
                                         >
                                             <option value="">Select Location</option>
                                             {locations.map((loc) => (
-                                                <option key={loc.item} value={loc.item}>{loc.item}</option>
+                                                <option key={loc.item} value={loc.item_full_name || loc.item}>{loc.item}</option>
                                             ))}
                                         </select>
                                     </div>
@@ -653,6 +806,63 @@ const OnboardingDetailsModal = ({ isOpen, onClose, data, isLoading, onUpdate, ca
                                 </div>
                             </form>
                         </section>
+
+                        {/* RPA Payload Preview — shown after HR details are saved */}
+                        <section className="mt-2">
+                            <button
+                                type="button"
+                                onClick={() => setShowRpaJson(prev => !prev)}
+                                className="w-full flex items-center justify-between text-lg font-bold text-slate-800 pb-2 border-b border-slate-100 hover:text-primary transition-colors"
+                            >
+                                <span className="flex items-center gap-2">
+                                    <Code2 className="text-primary" size={20} />
+                                    RPA Payload Preview
+                                </span>
+                                {showRpaJson ? <ChevronUp size={20} className="text-slate-400" /> : <ChevronDown size={20} className="text-slate-400" />}
+                            </button>
+
+                            {showRpaJson && (
+                                <div className="mt-4 space-y-3">
+                                    <div className="flex items-start justify-between gap-4">
+                                        <p className="text-xs text-slate-500 leading-relaxed">
+                                            Review the full JSON payload before sending to Power Automate / Desktop RPA.
+                                            <span className="font-medium text-amber-600"> Company and Location will be resolved to AD full names by the server.</span>
+                                        </p>
+                                        <button
+                                            type="button"
+                                            onClick={handleCopyJson}
+                                            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-colors"
+                                        >
+                                            <Copy size={12} />
+                                            {jsonCopied ? 'Copied!' : 'Copy JSON'}
+                                        </button>
+                                    </div>
+                                    <pre className="bg-slate-900 text-green-400 text-xs rounded-xl p-4 overflow-x-auto overflow-y-auto max-h-80 font-mono leading-relaxed whitespace-pre">
+                                        {rpaJson ?? JSON.stringify(buildRpaPayload(), null, 2)}
+                                    </pre>
+                                    <div className="flex justify-between items-center pt-1">
+                                        <button
+                                            type="button"
+                                            onClick={handleRecomputeJson}
+                                            className="flex items-center gap-2 px-4 py-2.5 bg-slate-600 text-white font-medium rounded-xl hover:bg-slate-700 transition-colors shadow-sm"
+                                        >
+                                            <RefreshCw size={16} />
+                                            Recompute JSON
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={handleProvision}
+                                            disabled={isProvisioning}
+                                            className="flex items-center gap-2 px-5 py-2.5 bg-green-600 text-white font-medium rounded-xl hover:bg-green-700 transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                                        >
+                                            <ShieldCheck size={18} />
+                                            {isProvisioning ? 'Sending...' : 'Provision AD Account'}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </section>
+                        </>
                     )}
 
                     {/* Personal Details */}
@@ -662,26 +872,19 @@ const OnboardingDetailsModal = ({ isOpen, onClose, data, isLoading, onUpdate, ca
                             Personal Details
                         </h3>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <DetailItem label="Full Name" value={`${personal_details?.lastName} ${personal_details?.firstName} ${personal_details?.middleName || ''}`}
-                                isEditing={isEditing} onChange={(val) => { }}
-                                customInput={isEditing && (
-                                    <div className="grid grid-cols-3 gap-2">
-                                        <input placeholder="Last Name" value={personal_details?.lastName || ''} onChange={e => updateField('personal_details', 'lastName', e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
-                                        <input placeholder="First Name" value={personal_details?.firstName || ''} onChange={e => updateField('personal_details', 'firstName', e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
-                                        <input placeholder="Middle Name" value={personal_details?.middleName || ''} onChange={e => updateField('personal_details', 'middleName', e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
-                                    </div>
-                                )}
-                            />
-                            <DetailItem label="Employee Name / 姓名" value={personal_details?.chineseName} isEditing={isEditing} onChange={v => updateField('personal_details', 'chineseName', v)} />
-                            <DetailItem label="Gender" value={personal_details?.gender} isEditing={isEditing} onChange={v => updateField('personal_details', 'gender', v)} options={GENDER_OPTIONS} />
-                            <DetailItem label="Nationality" value={personal_details?.nationality} isEditing={isEditing} onChange={v => updateField('personal_details', 'nationality', v)} options={NATIONALITY_OPTIONS} />
+                            <DetailItem label="Last Name / 姓" value={personal_details?.lastName} isEditing={isEditing} onChange={v => updateField('personal_details', 'lastName', v)} />
+                            <DetailItem label="First Name / 名" value={personal_details?.firstName} isEditing={isEditing} onChange={v => updateField('personal_details', 'firstName', v)} />
+                            <DetailItem label="Middle Name" value={personal_details?.middleName} isEditing={isEditing} onChange={v => updateField('personal_details', 'middleName', v)} />
+                            <DetailItem label="Full Name / 姓名" value={personal_details?.chineseName} isEditing={isEditing} onChange={v => updateField('personal_details', 'chineseName', v)} />
+                            <DetailItem label="Gender" value={personal_details?.gender} isEditing={isEditing} onChange={v => updateField('personal_details', 'gender', v)} options={getLookupOptions('Gender', GENDER_OPTIONS)} />
+                            <DetailItem label="Nationality" value={personal_details?.nationality} isEditing={isEditing} onChange={v => updateField('personal_details', 'nationality', v)} options={getLookupOptions('Nationality', NATIONALITY_OPTIONS)} />
                             <DetailItem label="Identity No." value={personal_details?.identityNo} isEditing={isEditing} onChange={v => updateField('personal_details', 'identityNo', v)} />
                             <DetailItem label="Date of Birth" value={personal_details?.dob} isEditing={isEditing} onChange={v => updateField('personal_details', 'dob', v)} type="date" />
                             <DetailItem label="Birth Place" value={personal_details?.birthPlace} isEditing={isEditing} onChange={v => updateField('personal_details', 'birthPlace', v)} />
-                            <DetailItem label="Race" value={personal_details?.race} isEditing={isEditing} onChange={v => updateField('personal_details', 'race', v)} options={RACE_OPTIONS} />
-                            <DetailItem label="Religion" value={personal_details?.religion} isEditing={isEditing} onChange={v => updateField('personal_details', 'religion', v)} options={RELIGION_OPTIONS} />
-                            <DetailItem label="Marital Status" value={personal_details?.maritalStatus} isEditing={isEditing} onChange={v => updateField('personal_details', 'maritalStatus', v)} options={MARITAL_STATUS_OPTIONS} />
-                            {(personal_details?.maritalStatus?.includes('Married') || isEditing) && (
+                            <DetailItem label="Race" value={personal_details?.race} isEditing={isEditing} onChange={v => updateField('personal_details', 'race', v)} options={getLookupOptions('Race', RACE_OPTIONS)} />
+                            <DetailItem label="Religion" value={personal_details?.religion} isEditing={isEditing} onChange={v => updateField('personal_details', 'religion', v)} options={getLookupOptions('Religion', RELIGION_OPTIONS)} />
+                            <DetailItem label="Marital Status" value={personal_details?.maritalStatus} isEditing={isEditing} onChange={v => updateField('personal_details', 'maritalStatus', v)} options={getLookupOptions('Marital Status', MARITAL_STATUS_OPTIONS)} />
+                            {(personal_details?.maritalStatus?.toLowerCase().includes('married') || isEditing) && (
                                 <DetailItem label="Marriage Date" value={personal_details?.marriageDate} isEditing={isEditing} onChange={v => updateField('personal_details', 'marriageDate', v)} type="date" />
                             )}
                         </div>
@@ -693,12 +896,12 @@ const OnboardingDetailsModal = ({ isOpen, onClose, data, isLoading, onUpdate, ca
                             <Users className="text-primary" size={20} />
                             Family Details
                         </h3>
-                        {(personal_details?.maritalStatus?.includes('Married') || isEditing) && (
+                        {(personal_details?.maritalStatus?.toLowerCase().includes('married') || isEditing) && (
                             <div className="mb-6 bg-slate-50 p-4 rounded-xl border border-slate-100">
                                 <h4 className="font-semibold text-slate-700 mb-3">Spouse</h4>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <DetailItem label="Name" value={family_details?.spouse_name} isEditing={isEditing} onChange={v => updateField('family_details', 'spouse_name', v)} />
-                                    <DetailItem label="Nationality" value={family_details?.spouse_nationality} isEditing={isEditing} onChange={v => updateField('family_details', 'spouse_nationality', v)} options={NATIONALITY_OPTIONS} />
+                                    <DetailItem label="Nationality" value={family_details?.spouse_nationality} isEditing={isEditing} onChange={v => updateField('family_details', 'spouse_nationality', v)} options={getLookupOptions('Nationality', NATIONALITY_OPTIONS)} />
                                 </div>
                             </div>
                         )}
@@ -710,9 +913,9 @@ const OnboardingDetailsModal = ({ isOpen, onClose, data, isLoading, onUpdate, ca
                                     {family_details?.children?.map((child, index) => (
                                         <div key={index} className="bg-slate-50 p-4 rounded-xl border border-slate-100 grid grid-cols-1 md:grid-cols-4 gap-4 relative">
                                             <DetailItem label="Name" value={child.name} isEditing={isEditing} onChange={v => updateFamilyChildren(index, 'name', v)} />
-                                            <DetailItem label="Nationality" value={child.nationality} isEditing={isEditing} onChange={v => updateFamilyChildren(index, 'nationality', v)} options={NATIONALITY_OPTIONS} />
+                                            <DetailItem label="Nationality" value={child.nationality} isEditing={isEditing} onChange={v => updateFamilyChildren(index, 'nationality', v)} options={getLookupOptions('Nationality', NATIONALITY_OPTIONS)} />
                                             <DetailItem label="DOB" value={child.dob} isEditing={isEditing} onChange={v => updateFamilyChildren(index, 'dob', v)} type="date" />
-                                            <DetailItem label="Gender" value={child.gender} isEditing={isEditing} onChange={v => updateFamilyChildren(index, 'gender', v)} options={GENDER_OPTIONS} />
+                                            <DetailItem label="Gender" value={child.gender} isEditing={isEditing} onChange={v => updateFamilyChildren(index, 'gender', v)} options={getLookupOptions('Gender', GENDER_OPTIONS)} />
                                         </div>
                                     ))}
                                     {isEditing && family_details?.children?.length === 0 && (
@@ -730,7 +933,24 @@ const OnboardingDetailsModal = ({ isOpen, onClose, data, isLoading, onUpdate, ca
                             Contact Details
                         </h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
-                            <DetailItem label="Address Type" value={contact_details?.addressType} isEditing={isEditing} onChange={v => updateField('contact_details', 'addressType', v)} options={ADDRESS_TYPE_OPTIONS} />
+                            <DetailItem label="Address Type" value={contact_details?.addressType} isEditing={isEditing}
+                                onChange={v => {
+                                    updateField('contact_details', 'addressType', v);
+                                    const addrRows = lookups['Address Type'] || [];
+                                    const selected = addrRows.find(r => r.item_full_name === v);
+                                    const isLocal = selected?.item?.toLowerCase().includes('local') || v.toLowerCase().includes('local');
+                                    if (isLocal) {
+                                        const countryRows = lookups['Country'] || [];
+                                        const sgRow = countryRows.find(r =>
+                                            r.item.toLowerCase().includes('singapore') ||
+                                            r.item_full_name.toLowerCase().includes('singapore')
+                                        );
+                                        updateField('contact_details', 'country', sgRow ? sgRow.item_full_name : 'SG - Singapore');
+                                    } else {
+                                        updateField('contact_details', 'country', '');
+                                    }
+                                }}
+                                options={getLookupOptions('Address Type', ADDRESS_TYPE_OPTIONS)} />
                             <DetailItem label="Block No" value={contact_details?.blockNo} isEditing={isEditing} onChange={v => updateField('contact_details', 'blockNo', v)} />
                         </div>
                         <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 mb-4">
@@ -745,7 +965,12 @@ const OnboardingDetailsModal = ({ isOpen, onClose, data, isLoading, onUpdate, ca
                                     </div>
                                     <div className="grid grid-cols-2 gap-4">
                                         <input placeholder="State" value={contact_details?.state || ''} onChange={e => updateField('contact_details', 'state', e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
-                                        <input placeholder="Country" value={contact_details?.country || ''} onChange={e => updateField('contact_details', 'country', e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                                        <select value={contact_details?.country || ''} onChange={e => updateField('contact_details', 'country', e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+                                            {getLookupOptions('Country', ['Singapore', 'Malaysia']).map(opt => {
+                                                const isObj = typeof opt === 'object' && opt !== null;
+                                                return <option key={isObj ? opt.value : opt} value={isObj ? opt.value : opt}>{isObj ? opt.label : opt}</option>;
+                                            })}
+                                        </select>
                                     </div>
                                 </div>
                             ) : (
@@ -781,8 +1006,7 @@ const OnboardingDetailsModal = ({ isOpen, onClose, data, isLoading, onUpdate, ca
                         </div>
                     </section>
 
-
-
+                    {/* RPA Payload Preview */}
 
                 </div>
 
@@ -870,9 +1094,12 @@ const DetailItem = ({ label, value, isEditing, onChange, type = 'text', customIn
                         className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary text-sm bg-white"
                     >
                         <option value="">Select...</option>
-                        {options.map(opt => (
-                            <option key={opt} value={opt}>{opt}</option>
-                        ))}
+                        {options.map(opt => {
+                            const isObj = typeof opt === 'object' && opt !== null;
+                            const val = isObj ? opt.value : opt;
+                            const lbl = isObj ? opt.label : opt;
+                            return <option key={val} value={val}>{lbl}</option>;
+                        })}
                     </select>
                 </div>
             );

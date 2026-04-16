@@ -91,7 +91,8 @@ export const AuthProvider = ({ children }) => {
                 const msalAccount = accounts[0];
                 const email = msalAccount.username;
                 const name = msalAccount.name;
-                const oid = msalAccount.homeAccountId;
+                // localAccountId is the pure Azure OID; homeAccountId is compound "{oid}.{tenantId}"
+                const oid = msalAccount.localAccountId || msalAccount.idTokenClaims?.oid;
 
                 try {
                     const response = await fetch('/api/auth/azure', {
@@ -128,10 +129,10 @@ export const AuthProvider = ({ children }) => {
 
     // Role Permissions Management
     const defaultPermissions = {
-        super_admin: ['/admin/dashboard', '/admin/content', '/admin/analytics', '/admin/jobs', '/admin/users', '/admin/events'],
+        super_admin: ['/admin/dashboard', '/admin/content', '/admin/analytics', '/admin/jobs', '/admin/users', '/admin/events', '/admin/settings'],
         site_admin: ['/admin/dashboard', '/admin/content', '/admin/analytics', '/admin/jobs', '/admin/users', '/admin/events'],
         hr_user: ['/admin/dashboard', '/admin/content', '/admin/jobs', '/admin/events'],
-        admin: ['/admin/dashboard', '/admin/content', '/admin/analytics', '/admin/jobs', '/admin/users', '/admin/events'],
+        admin: ['/admin/dashboard', '/admin/content', '/admin/analytics', '/admin/jobs', '/admin/users', '/admin/events', '/admin/settings'],
         marketing: ['/admin/dashboard', '/admin/content', '/admin/analytics', '/admin/events'],
         hr: ['/admin/dashboard', '/admin/content', '/admin/jobs', '/admin/events']
     };

@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run lint)",
+      "Bash(npx eslint src/components/investor/InvestorLayout.jsx src/pages/investor/*.jsx)",
+      "Bash(bash download-investor-files.sh)",
+      "Bash(npm run dev)",
+      "Bash(netstat -ano)",
+      "Bash(findstr \"5173 5174 5175 5176\")",
+      "Bash(taskkill /F /PID 22140)",
+      "Bash(taskkill /F /PID 28364)",
+      "Bash(taskkill /F /PID 13680)",
+      "Bash(findstr \":5173\")",
+      "Bash(taskkill //F //PID 18484 //PID 16640)",
+      "Bash(npx tsc *)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

@@ -180,12 +180,12 @@ const OurVision = () => {
                         <div className="bg-slate-50 p-8 rounded-xl border border-slate-100">
                             <div className="flex items-center gap-4 mb-4">
                                 <ShieldCheck className="text-primary" size={32} />
-                                <h3 className="text-2xl font-bold text-slate-900">QEEHS Policy</h3>
+                                <h3 className="text-2xl font-bold text-slate-900">QIEEHS Policy</h3>
                             </div>
                             <p className="text-slate-600 mb-6">
-                                In pursuit of our business excellence, we commit to Surpass Customer Expectations, and Continual Improvement of our Quality, Environment, Energy, Health and Safety (QEEHS) management system performance.
+                                In pursuit of our business excellence, we commit to Surpass Customer Expectations, and Continual Improvement of our Quality, Information Security, Environment, Energy, Health and Safety (QIEEHS) management system performance.
                             </p>
-                            <a href="/QEEHS_Policy_-_English_28Y24101829.pdf" target="_blank" rel="noopener noreferrer" className="text-primary font-semibold hover:underline">View QEEHS Policy &rarr;</a>
+                            <a href="/QIEEHS_Policy_English_Y250903.pdf" target="_blank" rel="noopener noreferrer" className="text-primary font-semibold hover:underline">View QIEEHS Policy &rarr;</a>
                         </div>
 
                         <div className="bg-slate-50 p-8 rounded-xl border border-slate-100">

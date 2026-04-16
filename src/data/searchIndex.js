@@ -72,12 +72,6 @@ export const searchIndex = [
         keywords: "tooling, moulds, molds, fabrication, design, engineering"
     },
     {
-        title: "Personal Protective Equipment",
-        path: "/business/ppe",
-        description: "Manufacturing of high-quality personal protective equipment (PPE).",
-        keywords: "ppe, masks, protection, safety, equipment, medical"
-    },
-    {
         title: "Capabilities",
         path: "/capabilities",
         description: "Our comprehensive range of manufacturing capabilities.",
